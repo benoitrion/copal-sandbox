@@ -129,16 +129,16 @@ export class ApiError extends Error {
   - filters by `project`;
   - applies `limit` (default 50).
 - **`analysis(id)`**:
-  - returns the record from `analyses.json` with that `id`;
+  - returns the record from `analyses` (or `analysis_pr`) with that `id`;
   - for an unknown id, throws `ApiError(404, 'unknown analysis')`.
 - **`feedback()`** keeps state in memory for the session:
   - appends `{ ruleId, verdict, note, at: new Date().toISOString() }` to that analysis's `feedback`;
   - for a `false-positive`, increments `falsePositives` of that rule in `metrics.drift`.
-- **`putPolicy()`** checks, for each rule in the YAML, that exactly one of `deny`, `pattern`, `secrets`, `dependencies`, `requireTest` is present:
+- **`putPolicy()`** parses the YAML (use the `yaml` npm package) and checks, for each rule, that exactly one of `deny`, `pattern`, `secrets`, `dependencies`, `requireTest` is present:
   - on failure, throws `ApiError(422, "invalid policy: <id> expected exactly one of deny, pattern, secrets, dependencies, requireTest; got none")`, the same wording as `error_422`;
   - otherwise, stores the YAML, bumps `version`, and returns `{ project, version, rules }`.
 - **`getPolicy()`**:
-  - returns `policy.json`, with the stored YAML when it has been edited;
+  - returns `policy`, with the stored YAML when it has been edited;
   - when `file` is given, `applicable` comes from the fixture for `src/web/invoice-controller.ts`;
   - for other paths, use the full rule list.
 - **`mentor()`** and **`plan()`** return their fixtures.
