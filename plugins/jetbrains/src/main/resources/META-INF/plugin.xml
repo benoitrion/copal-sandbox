@@ -1,0 +1,54 @@
+<idea-plugin>
+    <id>dev.copal.jetbrains</id>
+    <name>Copal.dev</name>
+    <vendor url="https://copal.lovable.app">Copal.dev</vendor>
+
+    <description><![CDATA[
+    <p>Executable engineering policy in the editor. Copal reads the project-owned <code>.copalrules</code>
+    (architecture boundaries, approved dependencies, security and quality rules) and highlights deviations while you type,
+    with the same engine used by the pre-commit hook, the pull-request check and Copal MCP.</p>
+    <ul>
+      <li>Errors for <b>enforce</b> rules, warnings for <b>audit</b> rules, with the reason and its sources</li>
+      <li>Quick fixes: apply the rule's concrete correction, or mark a finding as a false positive</li>
+      <li>Tools → Copal.dev: check staged changes, show the rules for the current file, set the API key</li>
+    </ul>
+    <p>Requires Node.js 20+ and the <code>copal</code> CLI.</p>
+    ]]></description>
+
+    <change-notes><![CDATA[<p>0.1.0 — first sandbox release.</p>]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Registered on base languages only: dialects (TypeScript, JSX, JSON5…) inherit them. -->
+        <externalAnnotator language="JavaScript" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+        <externalAnnotator language="JSON" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+        <externalAnnotator language="yaml" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+        <externalAnnotator language="JAVA" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+        <externalAnnotator language="kotlin" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+        <externalAnnotator language="Python" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+        <externalAnnotator language="go" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+        <externalAnnotator language="TEXT" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
+
+        <applicationConfigurable parentId="tools" instance="dev.copal.jetbrains.CopalConfigurable"
+                                 id="dev.copal.settings" displayName="Copal.dev"/>
+        <notificationGroup id="Copal.dev" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <group id="Copal.ToolsMenu" text="Copal.dev" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="Copal.CheckStaged" class="dev.copal.jetbrains.CheckStagedAction"
+                    text="Check Staged Changes" description="Run the Copal pre-commit validation on staged changes"/>
+            <action id="Copal.ShowRules" class="dev.copal.jetbrains.ShowRulesAction"
+                    text="Show Rules for Current File" description="Rules from .copalrules that apply to this file"/>
+            <action id="Copal.Recheck" class="dev.copal.jetbrains.RecheckFileAction"
+                    text="Re-check Current File"/>
+            <separator/>
+            <action id="Copal.SetApiKey" class="dev.copal.jetbrains.SetApiKeyAction"
+                    text="Set API Key…" description="Store the Copal device key in the IDE password safe"/>
+            <action id="Copal.OpenConsole" class="dev.copal.jetbrains.OpenConsoleAction"
+                    text="Open Copal Console"/>
+        </group>
+    </actions>
+</idea-plugin>

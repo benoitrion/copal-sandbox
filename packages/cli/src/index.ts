@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { applicableRules, bold, dim, FileChange, Finding, formatReport, green, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { applicableRules, bold, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef } from "./git";
 
@@ -11,6 +11,7 @@ Usage:
   copal login [--server URL] [--key KEY] [--create-key]   Save server URL + device key (~/.copal/config.json)
   copal status                                            Workspace state from the Copal server
   copal check [--staged|--base REF|--all|--diff FILE]     Validate changes against .copalrules
+  copal check --stdin-file PATH --json                    Check unsaved editor content (stdin) as PATH
              [--env ENV] [--json] [--fix] [--audit] [--local]
   copal hook install [--env ENV] | hook uninstall         Manage the git pre-commit hook
   copal rules [PATH] [--env ENV]                          Rules that apply to PATH (agent guidance)
@@ -52,6 +53,7 @@ async function check(flags: Flags): Promise<number> {
     return 0;
   }
   const cwd = process.cwd();
+  if (typeof flags["stdin-file"] === "string") return checkStdinFile(String(flags["stdin-file"]), flags);
   let root = cwd;
   try {
     root = repoRoot(cwd);
@@ -118,6 +120,22 @@ async function check(flags: Flags): Promise<number> {
     return 1;
   }
   return 0;
+}
+
+/**
+ * Editor integration (JetBrains, other IDEs): evaluate unsaved content read from stdin as FILE.
+ * Local engine only — keystroke checks are not recorded as governed evidence.
+ */
+async function checkStdinFile(file: string, flags: Flags): Promise<number> {
+  const abs = path.resolve(process.cwd(), file);
+  const repo = loadRepoPolicy(path.dirname(abs));
+  const rel = path.relative(repo.root, abs).split(path.sep).join("/");
+  const content = fs.readFileSync(0, "utf8");
+  const environment = String(flags.env ?? process.env.COPAL_ENV ?? "local");
+  const report = evaluate([fileAsChange(rel, content)], repo.policy, { environment });
+  if (flags.json) console.log(JSON.stringify({ ...report, project: repo.project, file: rel, mode: "local" }));
+  else console.log(formatReport(report));
+  return report.blocking && !flags.audit ? 1 : 0;
 }
 
 function applyFixes(root: string, findings: Finding[], restage: boolean): string[] {

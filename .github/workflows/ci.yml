@@ -1,0 +1,39 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  node:
+    name: Engine, plugins & e2e (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run e2e
+        env:
+          NO_COLOR: "1"
+
+  jetbrains:
+    name: JetBrains plugin (Gradle)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/jetbrains
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test buildPlugin --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: copal-jetbrains-plugin
+          path: plugins/jetbrains/build/distributions/*.zip

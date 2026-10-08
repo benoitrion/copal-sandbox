@@ -1,5 +1,7 @@
 # Copal sandbox — app mock + plugins d'intégration
 
+[![ci](https://github.com/benoitrion/copal-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/benoitrion/copal-sandbox/actions/workflows/ci.yml)
+
 Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout en bout, **sans aucune dépendance npm à l'exécution** (seul TypeScript sert au build).
 
 ```
@@ -26,6 +28,7 @@ Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout e
 | `packages/mcp-server` | **Plugin MCP** pour les agents (6 outils, 2 ressources, 1 prompt) |
 | `packages/git-app` | **App GitHub / GitLab** : webhooks → revue inline, résumé, status check requis, feedback `/copal` |
 | `packages/vscode-extension` | **Extension VS Code** : diagnostics en direct + corrections rapides |
+| `plugins/jetbrains` | **Plugin JetBrains** (IntelliJ, WebStorm, PyCharm…) : annotations, quick fixes, menu Tools → Copal.dev |
 | `integrations/` | Configs MCP (Claude Code, Cursor, VS Code, Codex), CI GitHub Actions / GitLab, manifeste GitHub App |
 
 ## Démarrage
@@ -33,7 +36,7 @@ Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout e
 ```bash
 npm install          # ne télécharge que typescript + @types/node (liens de workspace)
 npm run build
-npm test             # 16 tests : moteur, scénarios, webhooks, extension VS Code (runtime simulé)
+npm test             # 16 tests Node (+ 3 tests Kotlin via Gradle) : moteur, scénarios, webhooks, extension VS Code (runtime simulé)
 npm run e2e          # scénario complet (19 vérifications)
 KEEP=1 npm run e2e   # idem, puis laisse tourner les serveurs → http://localhost:4010
 ```
@@ -112,6 +115,7 @@ Faux positif : `// copal-ignore <rule-id>` sur la ligne ou celle du dessus (prop
 copal login --server http://localhost:4010 --key copal_dev_local   # ou --create-key
 copal hook install [--env ci]
 copal check [--staged | --base origin/main | --all | --diff file.patch] [--env ci] [--json] [--fix] [--local]
+copal check --stdin-file src/x.ts --json < contenu   # mode éditeur (JetBrains)
 copal rules src/web/x.ts
 ```
 Codes de sortie : `0` ok, `1` finding bloquant, `2` erreur. `COPAL_SKIP=1` contourne localement (la PR reste vérifiée). Un `.pre-commit-hooks.yaml` est fourni pour le framework *pre-commit*.
@@ -125,6 +129,8 @@ COPAL_SERVER=http://localhost:4010 COPAL_API_KEY=copal_dev_local npm run git-app
 node packages/git-app/dist/src/server.js simulate --provider github --dir <repo> --base main --head <branche> --number 1
 ```
 Contre le vrai GitHub : créez l'app avec `integrations/github-app-manifest.json` (permissions *pull requests*, *statuses*, *issues* en écriture, *contents* en lecture ; événements `pull_request`, `issue_comment`), exposez `:4020` via un tunnel, puis `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY_PATH`, `GITHUB_WEBHOOK_SECRET` (ou un simple `GITHUB_TOKEN`). GitLab : webhook *Merge request* + *Comments* vers `/webhooks/gitlab`, `GITLAB_TOKEN` (scope `api`), `GITLAB_WEBHOOK_SECRET`. Rendez le contexte `copal/check` obligatoire dans la protection de branche. Sans app, `integrations/ci/` fournit l'équivalent en job CI.
+
+**JetBrains** — `cd plugins/jetbrains && ./gradlew buildPlugin` produit `build/distributions/copal-jetbrains-0.1.0.zip` (aussi publié comme artefact par la CI). Installez-le via *Settings → Plugins → ⚙ → Install Plugin from Disk*, ou testez-le dans un IDE bac à sable avec `./gradlew runIde`. Dans *Settings → Tools → Copal.dev*, renseignez le chemin de la CLI (`…/copal-sandbox/packages/cli/dist/src/index.js`), puis *Tools → Copal.dev → Set API Key…*. Le plugin envoie le contenu non sauvegardé à `copal check --stdin-file <fichier> --json` : même moteur, aucune analyse enregistrée à chaque frappe. *Check Staged Changes* lance la validation pré-commit, qui est enregistrée dans la console.
 
 **VS Code** — ouvrez `packages/vscode-extension` dans VS Code et lancez *Run Copal extension (billing-api)* (F5). `npm run package` dans ce dossier produit un `.vsix` (télécharge `@vscode/vsce`).
 
@@ -148,4 +154,4 @@ Options : `--port 4010`, `--project dir1,dir2` (projets préchargés), `--persis
 - `--fix` remplace la ligne fautive mais n'ajoute pas l'import manquant (`LedgerPort`, `Currency`).
 - L'analyse d'import est textuelle (imports relatifs et paquets) ; les alias de `tsconfig` ne sont pas résolus.
 - L'extension VS Code compile contre un sous-ensemble local de l'API (`typings/vscode.d.ts`) ; installez `@types/vscode` et supprimez ce dossier pour développer plus loin.
-- Pas de plugin JetBrains dans ce bac à sable.
+- Le plugin JetBrains est compilé et testé par la CI GitHub (le SDK IntelliJ n'est pas téléchargeable dans l'environnement où il a été écrit) ; il n'a pas encore été lancé dans un IDE réel.
