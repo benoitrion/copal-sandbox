@@ -9,7 +9,7 @@ cd /path/to/your/repo
 claude mcp add copal -e COPAL_SERVER=http://localhost:4010 -e COPAL_API_KEY=copal_dev_local \
   -- node /ABS/copal-sandbox/packages/mcp-server/dist/src/index.js
 ```
-Ou commitez un `.mcp.json` à la racine du dépôt (voir `examples/billing-api/.mcp.json`).
+Ou commitez un `.mcp.json` à la racine du dépôt (voir `examples/billing-api/.mcp.json`). Ne mettez jamais la clé API dans un fichier commité : Copal le bloque (`hardcoded-credentials`). Lancez une fois `copal login --server … --key …` ; le serveur MCP lit la clé dans `~/.copal/config.json` ou dans la variable d'environnement `COPAL_API_KEY`.
 
 ## Cursor — `.cursor/mcp.json`
 ```json

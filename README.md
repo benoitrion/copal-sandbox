@@ -59,6 +59,8 @@ Dès que `COPAL_MOCK_DEV_KEY` est défini, la clé par défaut `copal_dev_local`
 
 Par défaut, les webhooks de PR publient sur le faux GitHub/GitLab du serveur. Pour publier sur de vraies PR, définissez `COPAL_GIT_TARGET=real` avec `GITHUB_TOKEN` (ou `GITHUB_APP_ID` + `GITHUB_PRIVATE_KEY`), `GITHUB_WEBHOOK_SECRET`, `GITLAB_TOKEN`.
 
+**Tester une API Copal** : `COPAL_SERVER=… COPAL_API_KEY=… node scripts/api-test.mjs` vérifie le contrat `/v1`, passe billing-api et chaque scénario par `/v1/analyze` en comparant avec le moteur local, puis teste les vrais clients (CLI, check de PR). Sur GitHub : *Actions → api-test* (cible par défaut : le serveur de démo de l'issue #1).
+
 **billing-api** est maintenant un vrai service HTTP (`cd examples/billing-api && npm install && npm start`) :
 - `GET /health`
 - `GET /customers/:id/invoices`

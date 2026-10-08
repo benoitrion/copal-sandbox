@@ -1,0 +1,59 @@
+name: api-test
+# Runs scripts/api-test.mjs (billing-api against the Copal /v1 API) against a running server.
+# By default it targets the latest demo server posted in the "demo-server" issue; or pass server + key.
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: "Copal server URL (empty = latest demo server from the demo-server issue)"
+        required: false
+      key:
+        description: "API key for that server (empty = from the demo-server issue)"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  api-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund && npm run build
+      - name: Resolve target server
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IN_SERVER: ${{ inputs.server }}
+          IN_KEY: ${{ inputs.key }}
+        run: |
+          S="$IN_SERVER"; K="$IN_KEY"
+          if [ -z "$S" ]; then
+            N=$(gh issue list --state open --label demo-server --json number --jq '.[0].number')
+            LINE=$( (gh api "repos/$GITHUB_REPOSITORY/issues/$N" --jq .body; gh api "repos/$GITHUB_REPOSITORY/issues/$N/comments" --jq '.[].body') | grep -o 'export COPAL_SERVER=[^ ]* COPAL_API_KEY=[^ `]*' | tail -1)
+            S=$(echo "$LINE" | sed -E 's/.*COPAL_SERVER=([^ ]*).*/\1/'); K=$(echo "$LINE" | sed -E 's/.*COPAL_API_KEY=([^ ]*).*/\1/')
+          fi
+          [ -n "$S" ] || { echo "no server found"; exit 1; }
+          echo "::add-mask::$K"
+          echo "COPAL_SERVER=$S" >> "$GITHUB_ENV"; echo "COPAL_API_KEY=$K" >> "$GITHUB_ENV"
+          echo "target: $S"
+      - name: Run billing-api × Copal API test
+        run: node scripts/api-test.mjs --md report.md
+      - name: Publish report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f report.md ] || echo "## ❌ api-test did not produce a report (server unreachable?)" > report.md
+          echo "" >> report.md; echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          N=$(gh issue list --state open --label api-test --json number --jq '.[0].number')
+          if [ -z "$N" ]; then
+            gh label create api-test --color 2E7D4F --description "Copal API test reports" 2>/dev/null || true
+            gh issue create --title "Copal API test reports" --label api-test --body-file report.md
+          else
+            gh issue comment "$N" --body-file report.md
+          fi
