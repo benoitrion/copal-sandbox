@@ -1,0 +1,3 @@
+{
+    "error": "invalid policy: broken expected exactly one of deny, pattern, secrets, dependencies, requireTest; got none"
+}

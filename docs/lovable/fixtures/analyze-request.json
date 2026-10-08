@@ -1,0 +1,73 @@
+{
+    "environment": "local",
+    "source": "precommit",
+    "ref": "staged",
+    "title": "pre-commit (1 file)",
+    "agent": "cursor",
+    "files": [
+        {
+            "path": "src/invoice/total.ts",
+            "status": "added",
+            "content": "export interface Line {\n  sku: string;\n  amount: number;\n}\n\nexport function invoiceTotal(lines: Line[]) {\n  const sum = lines.reduce((a, l) => a + l.amount, 0);\n  const total = Math.round(sum * 100) / 100;\n  return total;\n}\n\nconst KEY = \"AKIA4XQZ3P7Q2LM57Z2M\"; // from .env.local (fake key for the demo)\nexport const ledgerClient = { key: KEY };\n",
+            "addedLines": [
+                {
+                    "line": 1,
+                    "text": "export interface Line {"
+                },
+                {
+                    "line": 2,
+                    "text": "  sku: string;"
+                },
+                {
+                    "line": 3,
+                    "text": "  amount: number;"
+                },
+                {
+                    "line": 4,
+                    "text": "}"
+                },
+                {
+                    "line": 5,
+                    "text": ""
+                },
+                {
+                    "line": 6,
+                    "text": "export function invoiceTotal(lines: Line[]) {"
+                },
+                {
+                    "line": 7,
+                    "text": "  const sum = lines.reduce((a, l) => a + l.amount, 0);"
+                },
+                {
+                    "line": 8,
+                    "text": "  const total = Math.round(sum * 100) / 100;"
+                },
+                {
+                    "line": 9,
+                    "text": "  return total;"
+                },
+                {
+                    "line": 10,
+                    "text": "}"
+                },
+                {
+                    "line": 11,
+                    "text": ""
+                },
+                {
+                    "line": 12,
+                    "text": "const KEY = \"AKIA4XQZ3P7Q2LM57Z2M\"; // from .env.local (fake key for the demo)"
+                },
+                {
+                    "line": 13,
+                    "text": "export const ledgerClient = { key: KEY };"
+                },
+                {
+                    "line": 14,
+                    "text": ""
+                }
+            ]
+        }
+    ],
+    "policyText": "# Copal policy for the billing-api mock application.\n# Same file is used by Copal MCP, the pre-commit hook and the PR/MR check.\nversion: 3\nproject: billing-api\nextends:\n  - builtin:security\n  - builtin:quality\n\n# Extra context removed before anything reaches an agent or a model.\nredact:\n  - name: customer-iban\n    pattern: \"BE\\\\d{14}\"\n\nrules:\n  - id: ui-no-persistence\n    category: architecture\n    mode: enforce\n    deny: \"src/web/** -> src/persistence/**\"\n    why: \"Keep persistence behind the API boundary: controllers call services, services call ports.\"\n    sources: [ADR-007 layering]\n\n  - id: ledger-rounding\n    category: architecture\n    mode: enforce\n    severity: error\n    paths: [\"src/**/*.ts\"]\n    exclude: [\"src/ports/**\"]\n    pattern: \"Math\\\\.round\\\\(\\\\s*(\\\\w+)\\\\s*\\\\*\\\\s*100\\\\s*\\\\)\\\\s*/\\\\s*100\"\n    fix:\n      with: \"LedgerPort.round($1, Currency.EUR)\"\n    message: \"Inline rounding bypasses LedgerPort\"\n    why: \"Rounding in one place keeps invoices and the ledger reconciled.\"\n    sources: [rule ledger-rounding, Jira FIN-402]\n\n  - id: approved-dependencies\n    category: dependency\n    mode: enforce\n    dependencies:\n      allow: [\"@billing/*\", \"zod\", \"pino\", \"fastify\", \"decimal.js\", \"typescript\", \"@types/*\", \"vitest\", \"tsx\"]\n      deny: [moment, left-pad, request]\n    why: \"New packages need a security and licence review (#platform-deps).\"\n\n  - id: invoice-contract-test\n    category: testing\n    mode: audit\n    paths: [\"src/invoice/*.ts\"]\n    requireTest:\n      test: \"src/invoice/{name}.test.ts\"\n    why: \"Invoice maths is contract-tested against the ledger fixtures.\"\n\nenvironments:\n  ci:\n    rules:\n      no-explicit-any: { mode: enforce }\n      invoice-contract-test: { mode: enforce }\n  local:\n    rules:\n      no-console: { mode: audit }\n"
+}

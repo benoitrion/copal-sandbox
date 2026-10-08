@@ -1,0 +1,614 @@
+import type { Analysis } from "./types";
+export const analyses = [
+ {
+  "environment": "ci",
+  "findings": [],
+  "blocking": false,
+  "summary": {
+   "total": 0,
+   "blocking": 0,
+   "audit": 0,
+   "byCategory": {}
+  },
+  "filesChecked": 1,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "pr",
+  "ref": "acme/billing-api!12",
+  "title": "feat: invoice totals (authored with Cursor)",
+  "author": "e2e",
+  "id": "an_729af6c131",
+  "createdAt": "2026-10-08T11:30:44.835Z",
+  "feedback": []
+ },
+ {
+  "environment": "ci",
+  "findings": [],
+  "blocking": false,
+  "summary": {
+   "total": 0,
+   "blocking": 0,
+   "audit": 0,
+   "byCategory": {}
+  },
+  "filesChecked": 1,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "pr",
+  "ref": "acme/billing-api#248",
+  "title": "feat: invoice totals (authored with Cursor)",
+  "author": "e2e",
+  "id": "an_458f9ed295",
+  "createdAt": "2026-10-08T11:30:44.643Z",
+  "feedback": []
+ },
+ {
+  "environment": "local",
+  "findings": [
+   {
+    "ruleId": "invoice-contract-test",
+    "category": "testing",
+    "severity": "warning",
+    "mode": "audit",
+    "blocking": false,
+    "file": "src/invoice/total.ts",
+    "line": 1,
+    "message": "Change has no accompanying test (expected src/invoice/total.test.ts)",
+    "why": "Invoice maths is contract-tested against the ledger fixtures."
+   }
+  ],
+  "blocking": false,
+  "summary": {
+   "total": 1,
+   "blocking": 0,
+   "audit": 1,
+   "byCategory": {
+    "testing": 1
+   }
+  },
+  "filesChecked": 2,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "precommit",
+  "ref": "staged",
+  "title": "pre-commit (2 files)",
+  "author": "e2e",
+  "agent": "claude-code",
+  "id": "an_2f5e9d9e7c",
+  "createdAt": "2026-10-08T11:30:44.443Z",
+  "feedback": []
+ },
+ {
+  "environment": "ci",
+  "findings": [
+   {
+    "ruleId": "approved-dependencies",
+    "category": "dependency",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "package.json",
+    "line": 9,
+    "message": "Dependency \"moment\" is on the deny list",
+    "why": "New packages need a security and licence review (#platform-deps).",
+    "column": 5,
+    "endColumn": 13
+   },
+   {
+    "ruleId": "approved-dependencies",
+    "category": "dependency",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "package.json",
+    "line": 11,
+    "message": "Dependency \"some-unreviewed-sdk\" is not on the approved list",
+    "why": "New packages need a security and licence review (#platform-deps).",
+    "column": 5,
+    "endColumn": 26
+   },
+   {
+    "ruleId": "sql-injection",
+    "category": "security",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/persistence/invoice-repo.ts",
+    "line": 9,
+    "message": "SQL built by string concatenation/interpolation",
+    "why": "Use parameterised queries so user input can never change the statement.",
+    "column": 19,
+    "endColumn": 73
+   },
+   {
+    "ruleId": "hardcoded-credentials",
+    "category": "security",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/persistence/invoice-repo.ts",
+    "line": 12,
+    "message": "Hard-coded credential detected (customer-iban: BE71\u20266769)",
+    "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+    "column": 50,
+    "endColumn": 66
+   }
+  ],
+  "blocking": true,
+  "summary": {
+   "total": 4,
+   "blocking": 4,
+   "audit": 0,
+   "byCategory": {
+    "dependency": 2,
+    "security": 2
+   }
+  },
+  "filesChecked": 2,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "pr",
+  "ref": "acme/billing-api#250",
+  "title": "feat: customer invoice search (authored with Codex)",
+  "author": "e2e",
+  "id": "an_9295db2354",
+  "createdAt": "2026-10-08T11:30:43.932Z",
+  "feedback": []
+ },
+ {
+  "environment": "ci",
+  "findings": [
+   {
+    "ruleId": "ui-no-persistence",
+    "category": "architecture",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/web/invoice-controller.ts",
+    "line": 2,
+    "message": "Import of \"../persistence/invoice-repo\" crosses a forbidden boundary (src/web/** -> src/persistence/**)",
+    "why": "Keep persistence behind the API boundary: controllers call services, services call ports.",
+    "sources": [
+     "ADR-007 layering"
+    ],
+    "column": 30,
+    "endColumn": 57
+   },
+   {
+    "ruleId": "no-explicit-any",
+    "category": "quality",
+    "severity": "warning",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/web/invoice-controller.ts",
+    "line": 9,
+    "message": "Explicit `any` disables type checking",
+    "why": "Prefer a precise type or `unknown` with narrowing.",
+    "column": 45,
+    "endColumn": 50
+   },
+   {
+    "ruleId": "no-console",
+    "category": "quality",
+    "severity": "info",
+    "mode": "audit",
+    "blocking": false,
+    "file": "src/web/invoice-controller.ts",
+    "line": 6,
+    "message": "console.log left in production code",
+    "why": "Use the structured logger so output is levelled and redacted.",
+    "column": 5,
+    "endColumn": 17
+   }
+  ],
+  "blocking": true,
+  "summary": {
+   "total": 3,
+   "blocking": 2,
+   "audit": 1,
+   "byCategory": {
+    "architecture": 1,
+    "quality": 2
+   }
+  },
+  "filesChecked": 1,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "pr",
+  "ref": "acme/billing-api#249",
+  "title": "feat: faster invoice listing (authored with Claude Code)",
+  "author": "e2e",
+  "id": "an_499be2e34d",
+  "createdAt": "2026-10-08T11:30:43.743Z",
+  "feedback": []
+ },
+ {
+  "environment": "ci",
+  "findings": [
+   {
+    "ruleId": "invoice-contract-test",
+    "category": "testing",
+    "severity": "warning",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 6,
+    "message": "Change has no accompanying test (expected src/invoice/total.test.ts)",
+    "why": "Invoice maths is contract-tested against the ledger fixtures."
+   },
+   {
+    "ruleId": "ledger-rounding",
+    "category": "architecture",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 8,
+    "message": "Inline rounding bypasses LedgerPort",
+    "why": "Rounding in one place keeps invoices and the ledger reconciled.",
+    "sources": [
+     "rule ledger-rounding",
+     "Jira FIN-402"
+    ],
+    "column": 17,
+    "endColumn": 44,
+    "suggestion": {
+     "original": "  const total = Math.round(sum * 100) / 100;",
+     "replacement": "  const total = LedgerPort.round(sum, Currency.EUR);"
+    }
+   },
+   {
+    "ruleId": "hardcoded-credentials",
+    "category": "security",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 12,
+    "message": "Hard-coded credential detected (aws-access-key: AKIA\u20267Z2M)",
+    "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+    "column": 14,
+    "endColumn": 34
+   }
+  ],
+  "blocking": true,
+  "summary": {
+   "total": 3,
+   "blocking": 3,
+   "audit": 0,
+   "byCategory": {
+    "testing": 1,
+    "architecture": 1,
+    "security": 1
+   }
+  },
+  "filesChecked": 1,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "pr",
+  "ref": "acme/billing-api!12",
+  "title": "feat: invoice totals (authored with Cursor)",
+  "author": "e2e",
+  "id": "an_61834931d1",
+  "createdAt": "2026-10-08T11:30:43.504Z",
+  "feedback": []
+ },
+ {
+  "environment": "ci",
+  "findings": [
+   {
+    "ruleId": "invoice-contract-test",
+    "category": "testing",
+    "severity": "warning",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 6,
+    "message": "Change has no accompanying test (expected src/invoice/total.test.ts)",
+    "why": "Invoice maths is contract-tested against the ledger fixtures."
+   },
+   {
+    "ruleId": "ledger-rounding",
+    "category": "architecture",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 8,
+    "message": "Inline rounding bypasses LedgerPort",
+    "why": "Rounding in one place keeps invoices and the ledger reconciled.",
+    "sources": [
+     "rule ledger-rounding",
+     "Jira FIN-402"
+    ],
+    "column": 17,
+    "endColumn": 44,
+    "suggestion": {
+     "original": "  const total = Math.round(sum * 100) / 100;",
+     "replacement": "  const total = LedgerPort.round(sum, Currency.EUR);"
+    }
+   },
+   {
+    "ruleId": "hardcoded-credentials",
+    "category": "security",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 12,
+    "message": "Hard-coded credential detected (aws-access-key: AKIA\u20267Z2M)",
+    "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+    "column": 14,
+    "endColumn": 34
+   }
+  ],
+  "blocking": true,
+  "summary": {
+   "total": 3,
+   "blocking": 3,
+   "audit": 0,
+   "byCategory": {
+    "testing": 1,
+    "architecture": 1,
+    "security": 1
+   }
+  },
+  "filesChecked": 1,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "pr",
+  "ref": "acme/billing-api#248",
+  "title": "feat: invoice totals (authored with Cursor)",
+  "author": "e2e",
+  "id": "an_73f2e0c7c8",
+  "createdAt": "2026-10-08T11:30:43.282Z",
+  "feedback": [
+   {
+    "ruleId": "invoice-contract-test",
+    "verdict": "false-positive",
+    "note": "covered by the ledger e2e suite",
+    "at": "2026-10-08T11:30:44.275Z"
+   }
+  ]
+ },
+ {
+  "environment": "local",
+  "findings": [
+   {
+    "ruleId": "approved-dependencies",
+    "category": "dependency",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "package.json",
+    "line": 9,
+    "message": "Dependency \"moment\" is on the deny list",
+    "why": "New packages need a security and licence review (#platform-deps).",
+    "column": 5,
+    "endColumn": 13
+   },
+   {
+    "ruleId": "approved-dependencies",
+    "category": "dependency",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "package.json",
+    "line": 11,
+    "message": "Dependency \"some-unreviewed-sdk\" is not on the approved list",
+    "why": "New packages need a security and licence review (#platform-deps).",
+    "column": 5,
+    "endColumn": 26
+   },
+   {
+    "ruleId": "sql-injection",
+    "category": "security",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/persistence/invoice-repo.ts",
+    "line": 9,
+    "message": "SQL built by string concatenation/interpolation",
+    "why": "Use parameterised queries so user input can never change the statement.",
+    "column": 19,
+    "endColumn": 73
+   },
+   {
+    "ruleId": "hardcoded-credentials",
+    "category": "security",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/persistence/invoice-repo.ts",
+    "line": 12,
+    "message": "Hard-coded credential detected (customer-iban: BE71\u20266769)",
+    "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+    "column": 50,
+    "endColumn": 66
+   }
+  ],
+  "blocking": true,
+  "summary": {
+   "total": 4,
+   "blocking": 4,
+   "audit": 0,
+   "byCategory": {
+    "dependency": 2,
+    "security": 2
+   }
+  },
+  "filesChecked": 2,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "precommit",
+  "ref": "staged",
+  "title": "pre-commit (2 files)",
+  "author": "e2e",
+  "agent": "claude-code",
+  "id": "an_d80b4a139a",
+  "createdAt": "2026-10-08T11:30:42.712Z",
+  "feedback": []
+ },
+ {
+  "environment": "local",
+  "findings": [
+   {
+    "ruleId": "ui-no-persistence",
+    "category": "architecture",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/web/invoice-controller.ts",
+    "line": 2,
+    "message": "Import of \"../persistence/invoice-repo\" crosses a forbidden boundary (src/web/** -> src/persistence/**)",
+    "why": "Keep persistence behind the API boundary: controllers call services, services call ports.",
+    "sources": [
+     "ADR-007 layering"
+    ],
+    "column": 30,
+    "endColumn": 57
+   },
+   {
+    "ruleId": "no-console",
+    "category": "quality",
+    "severity": "info",
+    "mode": "audit",
+    "blocking": false,
+    "file": "src/web/invoice-controller.ts",
+    "line": 6,
+    "message": "console.log left in production code",
+    "why": "Use the structured logger so output is levelled and redacted.",
+    "column": 5,
+    "endColumn": 17
+   },
+   {
+    "ruleId": "no-explicit-any",
+    "category": "quality",
+    "severity": "warning",
+    "mode": "audit",
+    "blocking": false,
+    "file": "src/web/invoice-controller.ts",
+    "line": 9,
+    "message": "Explicit `any` disables type checking",
+    "why": "Prefer a precise type or `unknown` with narrowing.",
+    "column": 45,
+    "endColumn": 50
+   }
+  ],
+  "blocking": true,
+  "summary": {
+   "total": 3,
+   "blocking": 1,
+   "audit": 2,
+   "byCategory": {
+    "architecture": 1,
+    "quality": 2
+   }
+  },
+  "filesChecked": 1,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "precommit",
+  "ref": "staged",
+  "title": "pre-commit (1 file)",
+  "author": "e2e",
+  "agent": "claude-code",
+  "id": "an_b23b1bfc1b",
+  "createdAt": "2026-10-08T11:30:42.460Z",
+  "feedback": []
+ },
+ {
+  "environment": "local",
+  "findings": [
+   {
+    "ruleId": "ledger-rounding",
+    "category": "architecture",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 8,
+    "message": "Inline rounding bypasses LedgerPort",
+    "why": "Rounding in one place keeps invoices and the ledger reconciled.",
+    "sources": [
+     "rule ledger-rounding",
+     "Jira FIN-402"
+    ],
+    "column": 17,
+    "endColumn": 44,
+    "suggestion": {
+     "original": "  const total = Math.round(sum * 100) / 100;",
+     "replacement": "  const total = LedgerPort.round(sum, Currency.EUR);"
+    }
+   },
+   {
+    "ruleId": "hardcoded-credentials",
+    "category": "security",
+    "severity": "error",
+    "mode": "enforce",
+    "blocking": true,
+    "file": "src/invoice/total.ts",
+    "line": 12,
+    "message": "Hard-coded credential detected (aws-access-key: AKIA\u20267Z2M)",
+    "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+    "column": 14,
+    "endColumn": 34
+   },
+   {
+    "ruleId": "invoice-contract-test",
+    "category": "testing",
+    "severity": "warning",
+    "mode": "audit",
+    "blocking": false,
+    "file": "src/invoice/total.ts",
+    "line": 6,
+    "message": "Change has no accompanying test (expected src/invoice/total.test.ts)",
+    "why": "Invoice maths is contract-tested against the ledger fixtures."
+   }
+  ],
+  "blocking": true,
+  "summary": {
+   "total": 3,
+   "blocking": 2,
+   "audit": 1,
+   "byCategory": {
+    "architecture": 1,
+    "security": 1,
+    "testing": 1
+   }
+  },
+  "filesChecked": 1,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "precommit",
+  "ref": "staged",
+  "title": "pre-commit (1 file)",
+  "author": "e2e",
+  "agent": "claude-code",
+  "id": "an_2b950fd32a",
+  "createdAt": "2026-10-08T11:30:42.209Z",
+  "feedback": []
+ },
+ {
+  "environment": "ci",
+  "findings": [],
+  "blocking": false,
+  "summary": {
+   "total": 0,
+   "blocking": 0,
+   "audit": 0,
+   "byCategory": {}
+  },
+  "filesChecked": 8,
+  "rulesEvaluated": 9,
+  "project": "billing-api",
+  "source": "branch",
+  "ref": "main",
+  "title": "branch scan main",
+  "author": "e2e",
+  "agent": "claude-code",
+  "id": "an_c41bf8ae38",
+  "createdAt": "2026-10-08T11:30:41.893Z",
+  "feedback": []
+ }
+] satisfies Analysis[];

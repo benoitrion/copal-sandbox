@@ -1,0 +1,18 @@
+import type { Suggestions } from "./types";
+export const suggestions = {
+ "project": "billing-api",
+ "suggestions": [
+  {
+   "ruleId": "hardcoded-credentials",
+   "text": "\"hardcoded-credentials\" triggered 5\u00d7 recently."
+  },
+  {
+   "ruleId": "invoice-contract-test",
+   "text": "\"invoice-contract-test\" triggered 4\u00d7 recently (1 marked false positive \u2014 consider refining it)."
+  },
+  {
+   "ruleId": "approved-dependencies",
+   "text": "\"approved-dependencies\" triggered 4\u00d7 recently."
+  }
+ ]
+} satisfies Suggestions;

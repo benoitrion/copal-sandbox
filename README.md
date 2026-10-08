@@ -64,7 +64,9 @@ Par défaut, les webhooks de PR publient sur le faux GitHub/GitLab du serveur. P
 - `GET /customers/:id/invoices`
 - `POST /invoices/preview`
 
-**Lovable** : le prompt d'alignement est dans [`docs/lovable-alignment-prompt.md`](docs/lovable-alignment-prompt.md).
+**Lovable** : deux prompts d'alignement.
+- [`docs/lovable-alignment-prompt.md`](docs/lovable-alignment-prompt.md) : vrai backend Supabase.
+- [`docs/lovable-mock-alignment-prompt.md`](docs/lovable-mock-alignment-prompt.md) : app front-only sur mocks typés (`docs/lovable/mocks`), avec bascule vers le serveur de référence.
 
 ## Ce que montre `npm run e2e`
 

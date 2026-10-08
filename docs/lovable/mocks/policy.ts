@@ -1,0 +1,248 @@
+import type { PolicyResponse } from "./types";
+export const policy = {
+ "project": "billing-api",
+ "version": 12,
+ "yaml": "# Copal policy for the billing-api mock application.\n# Same file is used by Copal MCP, the pre-commit hook and the PR/MR check.\nversion: 3\nproject: billing-api\nextends:\n  - builtin:security\n  - builtin:quality\n\n# Extra context removed before anything reaches an agent or a model.\nredact:\n  - name: customer-iban\n    pattern: \"BE\\\\d{14}\"\n\nrules:\n  - id: ui-no-persistence\n    category: architecture\n    mode: enforce\n    deny: \"src/web/** -> src/persistence/**\"\n    why: \"Keep persistence behind the API boundary: controllers call services, services call ports.\"\n    sources: [ADR-007 layering]\n\n  - id: ledger-rounding\n    category: architecture\n    mode: enforce\n    severity: error\n    paths: [\"src/**/*.ts\"]\n    exclude: [\"src/ports/**\"]\n    pattern: \"Math\\\\.round\\\\(\\\\s*(\\\\w+)\\\\s*\\\\*\\\\s*100\\\\s*\\\\)\\\\s*/\\\\s*100\"\n    fix:\n      with: \"LedgerPort.round($1, Currency.EUR)\"\n    message: \"Inline rounding bypasses LedgerPort\"\n    why: \"Rounding in one place keeps invoices and the ledger reconciled.\"\n    sources: [rule ledger-rounding, Jira FIN-402]\n\n  - id: approved-dependencies\n    category: dependency\n    mode: enforce\n    dependencies:\n      allow: [\"@billing/*\", \"zod\", \"pino\", \"fastify\", \"decimal.js\", \"typescript\", \"@types/*\", \"vitest\", \"tsx\"]\n      deny: [moment, left-pad, request]\n    why: \"New packages need a security and licence review (#platform-deps).\"\n\n  - id: invoice-contract-test\n    category: testing\n    mode: audit\n    paths: [\"src/invoice/*.ts\"]\n    requireTest:\n      test: \"src/invoice/{name}.test.ts\"\n    why: \"Invoice maths is contract-tested against the ledger fixtures.\"\n\nenvironments:\n  ci:\n    rules:\n      no-explicit-any: { mode: enforce }\n      invoice-contract-test: { mode: enforce }\n  local:\n    rules:\n      no-console: { mode: audit }\n",
+ "policy": {
+  "version": 3,
+  "project": "billing-api",
+  "rules": [
+   {
+    "id": "hardcoded-credentials",
+    "category": "security",
+    "mode": "enforce",
+    "severity": "error",
+    "secrets": true,
+    "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager."
+   },
+   {
+    "id": "sql-injection",
+    "category": "security",
+    "mode": "enforce",
+    "severity": "error",
+    "pattern": "\\.(query|execute|raw)\\(\\s*(`[^`]*\\$\\{|[\"'][^\"']*[\"']\\s*\\+)",
+    "message": "SQL built by string concatenation/interpolation",
+    "why": "Use parameterised queries so user input can never change the statement."
+   },
+   {
+    "id": "path-traversal",
+    "category": "security",
+    "mode": "audit",
+    "severity": "warning",
+    "pattern": "(readFile|readFileSync|createReadStream|sendFile)\\([^)]*req\\.(params|query|body)",
+    "message": "File path built from request input",
+    "why": "Resolve against an allow-listed base directory and reject '..' segments."
+   },
+   {
+    "id": "no-console",
+    "category": "quality",
+    "mode": "audit",
+    "severity": "info",
+    "pattern": "\\bconsole\\.(log|debug)\\(",
+    "paths": [
+     "**/*.{ts,tsx,js,jsx}"
+    ],
+    "exclude": [
+     "**/*.test.*",
+     "**/scripts/**"
+    ],
+    "message": "console.log left in production code",
+    "why": "Use the structured logger so output is levelled and redacted."
+   },
+   {
+    "id": "no-explicit-any",
+    "category": "quality",
+    "mode": "audit",
+    "severity": "warning",
+    "pattern": ":\\s*any\\b",
+    "paths": [
+     "**/*.{ts,tsx}"
+    ],
+    "message": "Explicit `any` disables type checking",
+    "why": "Prefer a precise type or `unknown` with narrowing."
+   },
+   {
+    "id": "ui-no-persistence",
+    "category": "architecture",
+    "mode": "enforce",
+    "deny": "src/web/** -> src/persistence/**",
+    "why": "Keep persistence behind the API boundary: controllers call services, services call ports.",
+    "sources": [
+     "ADR-007 layering"
+    ]
+   },
+   {
+    "id": "ledger-rounding",
+    "category": "architecture",
+    "mode": "enforce",
+    "severity": "error",
+    "paths": [
+     "src/**/*.ts"
+    ],
+    "exclude": [
+     "src/ports/**"
+    ],
+    "pattern": "Math\\.round\\(\\s*(\\w+)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100",
+    "fix": {
+     "with": "LedgerPort.round($1, Currency.EUR)"
+    },
+    "message": "Inline rounding bypasses LedgerPort",
+    "why": "Rounding in one place keeps invoices and the ledger reconciled.",
+    "sources": [
+     "rule ledger-rounding",
+     "Jira FIN-402"
+    ]
+   },
+   {
+    "id": "approved-dependencies",
+    "category": "dependency",
+    "mode": "enforce",
+    "dependencies": {
+     "allow": [
+      "@billing/*",
+      "zod",
+      "pino",
+      "fastify",
+      "decimal.js",
+      "typescript",
+      "@types/*",
+      "vitest",
+      "tsx"
+     ],
+     "deny": [
+      "moment",
+      "left-pad",
+      "request"
+     ]
+    },
+    "why": "New packages need a security and licence review (#platform-deps)."
+   },
+   {
+    "id": "invoice-contract-test",
+    "category": "testing",
+    "mode": "audit",
+    "paths": [
+     "src/invoice/*.ts"
+    ],
+    "requireTest": {
+     "test": "src/invoice/{name}.test.ts"
+    },
+    "why": "Invoice maths is contract-tested against the ledger fixtures."
+   }
+  ],
+  "redact": [
+   {
+    "name": "customer-iban",
+    "pattern": "BE\\d{14}"
+   }
+  ],
+  "environments": {
+   "ci": {
+    "rules": {
+     "no-explicit-any": {
+      "mode": "enforce"
+     },
+     "invoice-contract-test": {
+      "mode": "enforce"
+     }
+    }
+   },
+   "local": {
+    "rules": {
+     "no-console": {
+      "mode": "audit"
+     }
+    }
+   }
+  }
+ },
+ "applicable": [
+  {
+   "id": "hardcoded-credentials",
+   "category": "security",
+   "mode": "enforce",
+   "severity": "error",
+   "secrets": true,
+   "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager."
+  },
+  {
+   "id": "sql-injection",
+   "category": "security",
+   "mode": "enforce",
+   "severity": "error",
+   "pattern": "\\.(query|execute|raw)\\(\\s*(`[^`]*\\$\\{|[\"'][^\"']*[\"']\\s*\\+)",
+   "message": "SQL built by string concatenation/interpolation",
+   "why": "Use parameterised queries so user input can never change the statement."
+  },
+  {
+   "id": "path-traversal",
+   "category": "security",
+   "mode": "audit",
+   "severity": "warning",
+   "pattern": "(readFile|readFileSync|createReadStream|sendFile)\\([^)]*req\\.(params|query|body)",
+   "message": "File path built from request input",
+   "why": "Resolve against an allow-listed base directory and reject '..' segments."
+  },
+  {
+   "id": "no-console",
+   "category": "quality",
+   "mode": "audit",
+   "severity": "info",
+   "pattern": "\\bconsole\\.(log|debug)\\(",
+   "paths": [
+    "**/*.{ts,tsx,js,jsx}"
+   ],
+   "exclude": [
+    "**/*.test.*",
+    "**/scripts/**"
+   ],
+   "message": "console.log left in production code",
+   "why": "Use the structured logger so output is levelled and redacted."
+  },
+  {
+   "id": "no-explicit-any",
+   "category": "quality",
+   "mode": "audit",
+   "severity": "warning",
+   "pattern": ":\\s*any\\b",
+   "paths": [
+    "**/*.{ts,tsx}"
+   ],
+   "message": "Explicit `any` disables type checking",
+   "why": "Prefer a precise type or `unknown` with narrowing."
+  },
+  {
+   "id": "ui-no-persistence",
+   "category": "architecture",
+   "mode": "enforce",
+   "deny": "src/web/** -> src/persistence/**",
+   "why": "Keep persistence behind the API boundary: controllers call services, services call ports.",
+   "sources": [
+    "ADR-007 layering"
+   ]
+  },
+  {
+   "id": "ledger-rounding",
+   "category": "architecture",
+   "mode": "enforce",
+   "severity": "error",
+   "paths": [
+    "src/**/*.ts"
+   ],
+   "exclude": [
+    "src/ports/**"
+   ],
+   "pattern": "Math\\.round\\(\\s*(\\w+)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100",
+   "fix": {
+    "with": "LedgerPort.round($1, Currency.EUR)"
+   },
+   "message": "Inline rounding bypasses LedgerPort",
+   "why": "Rounding in one place keeps invoices and the ledger reconciled.",
+   "sources": [
+    "rule ledger-rounding",
+    "Jira FIN-402"
+   ]
+  }
+ ],
+ "resolvedYaml": "version: 3\nproject: billing-api\nrules:\n  - id: hardcoded-credentials\n    category: security\n    mode: enforce\n    severity: error\n    secrets: true\n    why: Credentials in source end up in git history, prompts and logs. Load them from the secret manager.\n  - id: sql-injection\n    category: security\n    mode: enforce\n    severity: error\n    pattern: \"\\\\.(query|execute|raw)\\\\(\\\\s*(`[^`]*\\\\$\\\\{|[\\\"'][^\\\"']*[\\\"']\\\\s*\\\\+)\"\n    message: SQL built by string concatenation/interpolation\n    why: Use parameterised queries so user input can never change the statement.\n  - id: path-traversal\n    category: security\n    mode: audit\n    severity: warning\n    pattern: \"(readFile|readFileSync|createReadStream|sendFile)\\\\([^)]*req\\\\.(params|query|body)\"\n    message: File path built from request input\n    why: \"Resolve against an allow-listed base directory and reject '..' segments.\"\n  - id: no-console\n    category: quality\n    mode: audit\n    severity: info\n    pattern: \"\\\\bconsole\\\\.(log|debug)\\\\(\"\n    paths:\n      - \"**/*.{ts,tsx,js,jsx}\"\n    exclude:\n      - **/*.test.*\n      - **/scripts/**\n    message: console.log left in production code\n    why: Use the structured logger so output is levelled and redacted.\n  - id: no-explicit-any\n    category: quality\n    mode: audit\n    severity: warning\n    pattern: \":\\\\s*any\\\\b\"\n    paths:\n      - \"**/*.{ts,tsx}\"\n    message: \"Explicit `any` disables type checking\"\n    why: \"Prefer a precise type or `unknown` with narrowing.\"\n  - id: ui-no-persistence\n    category: architecture\n    mode: enforce\n    deny: src/web/** -> src/persistence/**\n    why: \"Keep persistence behind the API boundary: controllers call services, services call ports.\"\n    sources:\n      - ADR-007 layering\n  - id: ledger-rounding\n    category: architecture\n    mode: enforce\n    severity: error\n    paths:\n      - src/**/*.ts\n    exclude:\n      - src/ports/**\n    pattern: \"Math\\\\.round\\\\(\\\\s*(\\\\w+)\\\\s*\\\\*\\\\s*100\\\\s*\\\\)\\\\s*/\\\\s*100\"\n    fix:\n      with: \"LedgerPort.round($1, Currency.EUR)\"\n    message: Inline rounding bypasses LedgerPort\n    why: Rounding in one place keeps invoices and the ledger reconciled.\n    sources:\n      - rule ledger-rounding\n      - Jira FIN-402\n  - id: approved-dependencies\n    category: dependency\n    mode: enforce\n    dependencies:\n      allow:\n        - @billing/*\n        - zod\n        - pino\n        - fastify\n        - decimal.js\n        - typescript\n        - @types/*\n        - vitest\n        - tsx\n      deny:\n        - moment\n        - left-pad\n        - request\n    why: \"New packages need a security and licence review (#platform-deps).\"\n  - id: invoice-contract-test\n    category: testing\n    mode: audit\n    paths:\n      - src/invoice/*.ts\n    requireTest:\n      test: \"src/invoice/{name}.test.ts\"\n    why: Invoice maths is contract-tested against the ledger fixtures.\nredact:\n  - name: customer-iban\n    pattern: \"BE\\\\d{14}\"\nenvironments:\n  ci:\n    rules:\n      no-explicit-any:\n        mode: enforce\n      invoice-contract-test:\n        mode: enforce\n  local:\n    rules:\n      no-console:\n        mode: audit\n"
+} satisfies PolicyResponse;

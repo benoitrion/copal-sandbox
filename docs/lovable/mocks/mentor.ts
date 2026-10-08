@@ -1,0 +1,58 @@
+import type { MentorResponse } from "./types";
+export const mentor = {
+ "guidance": "Copal engineering policy for src/invoice/total.ts \u2014 follow these rules when writing code:\n\n- [ENFORCED] hardcoded-credentials: Never hard-code credentials; read them from configuration/secret manager. \u2014 Credentials in source end up in git history, prompts and logs. Load them from the secret manager.\n- [ENFORCED] sql-injection: SQL built by string concatenation/interpolation \u2014 Use parameterised queries so user input can never change the statement.\n- [audit] path-traversal: File path built from request input \u2014 Resolve against an allow-listed base directory and reject '..' segments.\n- [audit] no-console: console.log left in production code \u2014 Use the structured logger so output is levelled and redacted.\n- [audit] no-explicit-any: Explicit `any` disables type checking \u2014 Prefer a precise type or `unknown` with narrowing.\n- [ENFORCED] ledger-rounding: Inline rounding bypasses LedgerPort \u2014 Rounding in one place keeps invoices and the ledger reconciled. (preferred: LedgerPort.round($1, Currency.EUR))\n- [audit] invoice-contract-test: Add/update a test matching src/invoice/{name}.test.ts \u2014 Invoice maths is contract-tested against the ledger fixtures.",
+ "findings": [
+  {
+   "ruleId": "ledger-rounding",
+   "category": "architecture",
+   "severity": "error",
+   "mode": "enforce",
+   "blocking": true,
+   "file": "src/invoice/total.ts",
+   "line": 8,
+   "message": "Inline rounding bypasses LedgerPort",
+   "why": "Rounding in one place keeps invoices and the ledger reconciled.",
+   "sources": [
+    "rule ledger-rounding",
+    "Jira FIN-402"
+   ],
+   "column": 17,
+   "endColumn": 44,
+   "suggestion": {
+    "original": "  const total = Math.round(sum * 100) / 100;",
+    "replacement": "  const total = LedgerPort.round(sum, Currency.EUR);"
+   }
+  },
+  {
+   "ruleId": "hardcoded-credentials",
+   "category": "security",
+   "severity": "error",
+   "mode": "enforce",
+   "blocking": true,
+   "file": "src/invoice/total.ts",
+   "line": 12,
+   "message": "Hard-coded credential detected (aws-access-key: AKIA\u20267Z2M)",
+   "why": "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+   "column": 14,
+   "endColumn": 34
+  },
+  {
+   "ruleId": "invoice-contract-test",
+   "category": "testing",
+   "severity": "warning",
+   "mode": "audit",
+   "blocking": false,
+   "file": "src/invoice/total.ts",
+   "line": 1,
+   "message": "Change has no accompanying test (expected src/invoice/total.test.ts)",
+   "why": "Invoice maths is contract-tested against the ledger fixtures."
+  }
+ ],
+ "redactedSnippet": "export interface Line {\n  sku: string;\n  amount: number;\n}\n\nexport function invoiceTotal(lines: Line[]) {\n  const sum = lines.reduce((a, l) => a + l.amount, 0);\n  const total = Math.round(sum * 100) / 100;\n  return total;\n}\n\nconst KEY = \"[REDACTED:aws-access-key]\"; // from .env.local (fake key for the demo)\nexport const ledgerClient = { key: KEY };\n",
+ "redactions": [
+  {
+   "name": "aws-access-key",
+   "count": 1
+  }
+ ]
+} satisfies MentorResponse;

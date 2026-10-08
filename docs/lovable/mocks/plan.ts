@@ -1,0 +1,17 @@
+import type { PlanResponse } from "./types";
+export const plan = {
+ "story": "As a finance user I can preview an invoice total in USD",
+ "steps": [
+  "Locate the module that owns this behaviour (respect layering: web \u2192 service \u2192 port).",
+  "Write or update the contract test first.",
+  "Implement behind the existing port; do not add dependencies outside the approved list.",
+  "Run `copal check --staged` before committing."
+ ],
+ "constraints": [
+  "hardcoded-credentials: Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+  "sql-injection: Use parameterised queries so user input can never change the statement.",
+  "ui-no-persistence: Keep persistence behind the API boundary: controllers call services, services call ports.",
+  "ledger-rounding: Rounding in one place keeps invoices and the ledger reconciled.",
+  "approved-dependencies: New packages need a security and licence review (#platform-deps)."
+ ]
+} satisfies PlanResponse;

@@ -1,0 +1,4 @@
+import type { ApiErrorBody } from "./types";
+export const error_401 = {
+ "error": "missing or invalid x-api-key (dev key: copal_dev_local)"
+} satisfies ApiErrorBody;
