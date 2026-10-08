@@ -40,6 +40,8 @@ import { loadPolicy } from "@copal/core";           // Node: adds filesystem hel
 
 1. Change code in `src/`, run `npm run build:esm -w packages/core`, commit `esm/` (CI fails if it is stale).
 2. Bump `version` in `package.json`.
-3. Tag and push: `git tag core-vX.Y.Z && git push origin core-vX.Y.Z`. The `release-core` workflow tests, packs and creates the GitHub release.
+3. Publish a GitHub release with a new tag `core-vX.Y.Z` on `main` (Releases → Draft a new release, or `gh release create core-vX.Y.Z --target main --title "@copal/core X.Y.Z" --notes ""`). The `release-core` workflow tests the tagged commit, then attaches the npm tarball and the ES module to the release.
+
+Before the first release, or between releases, pin jsDelivr to a commit instead of a tag: `https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@<commit-sha>/packages/core/esm/copal-core.mjs`.
 
 The bundle is checked by `test/esm.test.ts` (identical results to the source build on every billing-api scenario).

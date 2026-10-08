@@ -141,7 +141,7 @@ export class ApiError extends Error {
   - returns `policy`, with the stored YAML when it has been edited;
   - when `file` is given, `applicable` comes from the fixture for `src/web/invoice-controller.ts`;
   - for other paths, use the full rule list.
-- **`mentor()`** and **`plan()`** return their fixtures. If the playground should check any code the user types, not just the prefilled scenario, compute `mentor()` in the browser with the published engine instead. Install it with `npm i https://github.com/benoitrion/copal-sandbox/releases/download/core-v0.1.0/copal-core-0.1.0.tgz`, then `import { evaluate, fileAsChange, parsePolicy, resolvePolicy, redact, applicableRules, rulesToGuidance } from "@copal/core/isomorphic"`. It needs no backend.
+- **`mentor()`** and **`plan()`** return their fixtures. If the playground should check any code the user types, not just the prefilled scenario, compute `mentor()` in the browser with the published engine instead. Once the `core-v0.1.0` release exists, install it with `npm i https://github.com/benoitrion/copal-sandbox/releases/download/core-v0.1.0/copal-core-0.1.0.tgz`, then `import { evaluate, fileAsChange, parsePolicy, resolvePolicy, redact, applicableRules, rulesToGuidance } from "@copal/core/isomorphic"`. It needs no backend.
 - **`status()`**, **`projects()`**, **`metrics()`** and **`suggestions()`** return their fixtures.
 
 ### `HttpCopalApi`

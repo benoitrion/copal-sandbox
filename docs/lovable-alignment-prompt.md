@@ -26,11 +26,11 @@ The engine is published as a versioned, single-file ES module that runs in Deno 
 
 ```ts
 // supabase/functions/_shared/copal.ts
-// @ts-types="https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.1.0/packages/core/esm/copal-core.d.ts"
-export * from "https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.1.0/packages/core/esm/copal-core.mjs";
+// @ts-types="https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@ae56fdfbf5c3f5a894157c63d0ec4ede5d881a05/packages/core/esm/copal-core.d.ts"
+export * from "https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@ae56fdfbf5c3f5a894157c63d0ec4ede5d881a05/packages/core/esm/copal-core.mjs";
 ```
 
-- Everything else imports from `../_shared/copal.ts`, so upgrading means changing one tag (`core-vX.Y.Z`, see the repository releases). Each tag is immutable.
+- The URL is pinned to an exact commit, so it never changes under you. Everything else imports from `../_shared/copal.ts`, so upgrading means changing this one line (to a newer commit, or to a release tag `core-vX.Y.Z` once releases exist).
 - Use `parsePolicy`, `resolvePolicy`, `validatePolicy`, `evaluate`, `fileAsChange`, `redact`, `applicableRules`, `rulesToGuidance`.
 - Call `resolvePolicy(parsePolicy(text))` with no loader. Only `extends: [builtin:…]` packs resolve; a policy that references a file is refused with an error. Return that error as 422, so clients can never make the server read files.
 - The expected behaviour is pinned by `packages/core/test/` and the scenarios in `examples/billing-api/scenarios/`.

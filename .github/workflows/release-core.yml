@@ -1,11 +1,12 @@
 name: release-core
-# Publishes the rule engine. Push a tag `core-vX.Y.Z` matching packages/core/package.json.
-#  - GitHub Release with the npm tarball (installable by URL, no registry account needed)
-#  - The tag itself pins the ES module served by jsDelivr:
+# Publishes the rule engine when a GitHub release tagged `core-vX.Y.Z` is published
+# (Releases → Draft a new release → new tag core-vX.Y.Z on main, or `gh release create core-vX.Y.Z --target main`).
+#  - attaches the npm tarball (installable by URL, no registry account needed) and the ES module
+#  - the tag pins the ES module served by jsDelivr:
 #    https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-vX.Y.Z/packages/core/esm/copal-core.mjs
 on:
-  push:
-    tags: ["core-v*"]
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -15,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,15 +28,20 @@ jobs:
       - name: Tag matches package version
         run: |
           V=$(node -p "require('./packages/core/package.json').version")
-          test "${GITHUB_REF_NAME}" = "core-v$V" || { echo "tag ${GITHUB_REF_NAME} != core-v$V"; exit 1; }
+          TAG="${{ github.event.release.tag_name }}"
+          case "$TAG" in core-v*) ;; *) echo "not an engine release ($TAG), skipping"; echo "SKIP=1" >> "$GITHUB_ENV"; exit 0;; esac
+          test "$TAG" = "core-v$V" || { echo "tag $TAG != core-v$V (bump packages/core/package.json first)"; exit 1; }
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=$V" >> "$GITHUB_ENV"
       - name: Pack
+        if: env.SKIP != '1'
         run: npm pack -w packages/core
-      - name: Create release
+      - name: Attach assets and notes
+        if: env.SKIP != '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          CDN="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${GITHUB_REF_NAME}/packages/core/esm"
+          CDN="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${TAG}/packages/core/esm"
           cat > notes.md <<NOTES
           Copal rule engine **${VERSION}**.
 
@@ -43,8 +51,8 @@ jobs:
           import { evaluate, parsePolicy, resolvePolicy } from "${CDN}/copal-core.mjs";
           \`\`\`
 
-          **npm (Node, Vite)**: \`npm i https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/copal-core-${VERSION}.tgz\`
+          **npm (Node, Vite)**: \`npm i https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/copal-core-${VERSION}.tgz\`
           then \`import { evaluate } from "@copal/core/isomorphic"\` (browser-safe) or \`"@copal/core"\` (Node, with filesystem helpers).
           NOTES
-          gh release create "$GITHUB_REF_NAME" "copal-core-${VERSION}.tgz" packages/core/esm/copal-core.mjs packages/core/esm/copal-core.d.ts \
-            --title "@copal/core ${VERSION}" --notes-file notes.md
+          gh release upload "$TAG" "copal-core-${VERSION}.tgz" packages/core/esm/copal-core.mjs packages/core/esm/copal-core.d.ts --clobber
+          gh release edit "$TAG" --title "@copal/core ${VERSION}" --notes-file notes.md
