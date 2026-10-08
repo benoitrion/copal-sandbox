@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { reach, ruleHealth } from "@copal/core";
 import type { Finding, Policy, Report } from "@copal/core";
 
 export interface Project {
@@ -218,70 +219,13 @@ export class Store {
     return { project: project ?? null, developer: developer ?? null, categories, events: ev.length };
   }
 
-  /**
-   * Rule health for the lead's dashboard. "Caught late" = share of a rule's findings first seen at the PR/CI stage
-   * instead of in the editor, the agent's self-check or pre-commit — the signal that the knowledge isn't reaching
-   * the developer or the AI.
-   */
+  /** Thin wrappers: the definitions live in @copal/core (analytics.ts), shared with every backend. */
   ruleHealth(project: string | undefined, policy: Policy | undefined, days = 30, now = Date.now()) {
-    const from = now - days * 864e5;
-    const mid = now - (days / 2) * 864e5;
-    const list = this.state.analyses.filter((a) => (!project || a.project === project) && Date.parse(a.createdAt) >= from);
-    const late = new Set(["pr", "ci"]);
-    const rows = new Map<string, { ruleId: string; hits: number; recent: number; earlier: number; late: number; fp: number; lastSeen?: string }>();
-    const row = (id: string) => rows.get(id) ?? rows.set(id, { ruleId: id, hits: 0, recent: 0, earlier: 0, late: 0, fp: 0 }).get(id)!;
-    for (const a of list) {
-      const t = Date.parse(a.createdAt);
-      for (const f of a.findings) {
-        const r = row(f.ruleId);
-        r.hits++;
-        t >= mid ? r.recent++ : r.earlier++;
-        if (late.has(a.source)) r.late++;
-        if (!r.lastSeen || a.createdAt > r.lastSeen) r.lastSeen = a.createdAt;
-      }
-      for (const fb of a.feedback) if (fb.verdict === "false-positive") row(fb.ruleId).fp++;
-    }
-    // "mark as false positive" from the IDE plugins counts too
-    for (const e of this.state.coachEvents) if (e.action === "false_positive" && (!project || e.project === project) && Date.parse(e.at) >= from) row(e.ruleId).fp++;
-    const silentSince = now - 90 * 864e5;
-    const everSeen = new Set(this.state.analyses.filter((a) => (!project || a.project === project) && Date.parse(a.createdAt) >= silentSince).flatMap((a) => a.findings.map((f) => f.ruleId)));
-    const out = (policy?.rules ?? []).map((rule) => {
-      const r = rows.get(rule.id) ?? { ruleId: rule.id, hits: 0, recent: 0, earlier: 0, late: 0, fp: 0 };
-      const caughtLate = r.hits ? r.late / r.hits : null;
-      const falsePositiveRate = r.hits ? r.fp / r.hits : null;
-      const trend = r.recent > r.earlier ? "up" : r.recent < r.earlier ? "down" : "flat";
-      const status: string[] = [];
-      if ((falsePositiveRate ?? 0) >= 0.2 && r.hits >= 3) status.push("noisy");
-      if (r.hits >= 3 && trend !== "down") status.push("recurring");
-      if ((caughtLate ?? 0) >= 0.5 && r.hits >= 2) status.push("caught-late");
-      if (!everSeen.has(rule.id)) status.push("silent");
-      if (!rule.coach?.question) status.push("uncoached");
-      return { ruleId: rule.id, mode: rule.mode ?? "audit", hits: r.hits, trend, caughtLate, falsePositiveRate, lastSeen: r.lastSeen ?? null, status, kata: rule.coach?.kata ?? null };
-    });
-    return { project: project ?? null, days, rules: out.sort((a, b) => b.status.length - a.status.length || b.hits - a.hits) };
+    return ruleHealth({ policy, analyses: this.state.analyses, events: this.state.coachEvents, project, days, now });
   }
 
-  /** Reach: is each surface delivering the team's knowledge? Last time each was seen. */
   reach(project?: string) {
-    const last = (src: string[]) =>
-      this.state.analyses.filter((a) => (!project || a.project === project) && src.includes(a.source)).map((a) => a.createdAt).sort().at(-1) ?? null;
-    const sessions = this.state.sessions.filter((s) => !project || s.project === project);
-    const agents: Record<string, { sessions: number; lastSeen: string }> = {};
-    for (const s of sessions) {
-      const a = (agents[s.agent] ??= { sessions: 0, lastSeen: s.at });
-      a.sessions++;
-      if (s.at > a.lastSeen) a.lastSeen = s.at;
-    }
-    const nav = Object.values(this.state.navSessions).filter((n) => !project || n.project === project);
-    return {
-      project: project ?? null,
-      precommit: { lastSeen: last(["precommit"]) },
-      prCheck: { lastSeen: last(["pr", "ci"]) },
-      agentSelfCheck: { lastSeen: last(["mcp"]) },
-      ide: { heartbeats: this.state.heartbeats },
-      agents,
-      navigator: { sessions: nav.length, answered: nav.filter((n) => n.answeredAt && !n.skipped).length, skipped: nav.filter((n) => n.skipped).length },
-    };
+    return reach({ analyses: this.state.analyses, sessions: this.state.sessions, navigator: Object.values(this.state.navSessions), heartbeats: this.state.heartbeats, project });
   }
 
   /** AI usage tied to outcomes: tokens and spend per merged change, retries, navigator vs not. */

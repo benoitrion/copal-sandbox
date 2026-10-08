@@ -1,4 +1,4 @@
-/*! @copal/core 0.2.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
+/*! @copal/core 0.3.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
@@ -1530,6 +1530,69 @@ function rulesToGuidance(rules, filePath) {
   }
   return out.join("\n");
 }
+
+// src/analytics.ts
+var LATE_SOURCES = ["pr", "ci"];
+function ruleHealth(input) {
+  const { policy, project } = input;
+  const days = input.days ?? 30;
+  const now = input.now ?? Date.now();
+  const from = now - days * 864e5;
+  const mid = now - days / 2 * 864e5;
+  const mine = input.analyses.filter((a) => !project || a.project === project);
+  const rows = /* @__PURE__ */ new Map();
+  const row = (id) => rows.get(id) ?? rows.set(id, { hits: 0, recent: 0, earlier: 0, late: 0, fp: 0 }).get(id);
+  for (const a of mine) {
+    const t = Date.parse(a.createdAt);
+    if (t < from) continue;
+    for (const f of a.findings) {
+      const r = row(f.ruleId);
+      r.hits++;
+      t >= mid ? r.recent++ : r.earlier++;
+      if (LATE_SOURCES.includes(a.source)) r.late++;
+      if (!r.lastSeen || a.createdAt > r.lastSeen) r.lastSeen = a.createdAt;
+    }
+    for (const fb of a.feedback ?? []) if (fb.verdict === "false-positive") row(fb.ruleId).fp++;
+  }
+  for (const e of input.events ?? []) if (e.action === "false_positive" && (!project || e.project === project) && Date.parse(e.at) >= from) row(e.ruleId).fp++;
+  const since90 = now - 90 * 864e5;
+  const seen90 = new Set(mine.filter((a) => Date.parse(a.createdAt) >= since90).flatMap((a) => a.findings.map((f) => f.ruleId)));
+  const out = (policy?.rules ?? []).map((rule) => {
+    const r = rows.get(rule.id) ?? { hits: 0, recent: 0, earlier: 0, late: 0, fp: 0 };
+    const caughtLate = r.hits ? r.late / r.hits : null;
+    const falsePositiveRate = r.hits ? Math.min(1, r.fp / r.hits) : null;
+    const trend = r.recent > r.earlier ? "up" : r.recent < r.earlier ? "down" : "flat";
+    const status = [];
+    if ((falsePositiveRate ?? 0) >= 0.2 && r.hits >= 3) status.push("noisy");
+    if (r.hits >= 3 && trend !== "down") status.push("recurring");
+    if ((caughtLate ?? 0) >= 0.5 && r.hits >= 2) status.push("caught-late");
+    if (!seen90.has(rule.id)) status.push("silent");
+    if (!rule.coach?.question) status.push("uncoached");
+    return { ruleId: rule.id, mode: rule.mode ?? "audit", hits: r.hits, trend, caughtLate, falsePositiveRate, lastSeen: r.lastSeen ?? null, status, kata: rule.coach?.kata ?? null };
+  });
+  return { project: project ?? null, days, rules: out.sort((a, b) => b.status.length - a.status.length || b.hits - a.hits) };
+}
+function reach(input) {
+  var _a;
+  const { project } = input;
+  const last = (src) => input.analyses.filter((a) => (!project || a.project === project) && src.includes(a.source)).map((a) => a.createdAt).sort().pop() ?? null;
+  const agents = {};
+  for (const s of (input.sessions ?? []).filter((x) => !project || x.project === project)) {
+    const a = agents[_a = s.agent] ?? (agents[_a] = { sessions: 0, lastSeen: s.at });
+    a.sessions++;
+    if (s.at > a.lastSeen) a.lastSeen = s.at;
+  }
+  const nav = (input.navigator ?? []).filter((n) => !project || n.project === project);
+  return {
+    project: project ?? null,
+    precommit: { lastSeen: last(["precommit"]) },
+    prCheck: { lastSeen: last(LATE_SOURCES) },
+    agentSelfCheck: { lastSeen: last(["mcp"]) },
+    ide: { heartbeats: input.heartbeats ?? 0 },
+    agents,
+    navigator: { sessions: nav.length, answered: nav.filter((n) => n.answeredAt && !n.skipped).length, skipped: nav.filter((n) => n.skipped).length }
+  };
+}
 export {
   AGENT_CONTEXT_TARGETS,
   BUILTIN_PACKS,
@@ -1537,6 +1600,7 @@ export {
   CONTEXT_BEGIN,
   CONTEXT_END,
   HINT_LEVELS,
+  LATE_SOURCES,
   POLICY_FILE,
   SMELL_DEFAULTS,
   SUPPORTED_VERSIONS,
@@ -1574,11 +1638,13 @@ export {
   parseUnifiedDiff,
   parseYaml,
   parseYamlSubset,
+  reach,
   red,
   redact,
   referenceLink,
   reportToMarkdown,
   resolvePolicy,
+  ruleHealth,
   ruleSummary,
   rulesToGuidance,
   rulesWithoutCoaching,

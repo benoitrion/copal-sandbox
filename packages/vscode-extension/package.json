@@ -80,6 +80,6 @@
     "package": "bash scripts-package.sh"
   },
   "dependencies": {
-    "@copal/core": "0.2.0"
+    "@copal/core": "0.3.0"
   }
 }

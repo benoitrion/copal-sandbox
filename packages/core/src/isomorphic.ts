@@ -11,3 +11,4 @@ export * from "./engine";
 export * from "./format";
 export * from "./coach";
 export * from "./smells";
+export * from "./analytics";

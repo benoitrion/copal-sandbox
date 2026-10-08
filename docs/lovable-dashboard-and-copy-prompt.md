@@ -2,6 +2,22 @@
 
 Replaces all earlier dashboard prompts (pivot phases 1 and 4, "restore", "four sections").
 
+## Who builds what (do not duplicate)
+| Lovable (this app) | copal-sandbox (Claude) — do NOT rebuild |
+| --- | --- |
+| Landing page and copy | Engine `@copal/core`: rule evaluation, smells, navigator questions, briefs, rule drafts, **rule health and reach calculations** |
+| Dashboard, Rules editor, Checks, Settings (UI) | PR bot for GitHub/GitLab (review comments, `/copal explain`, `/copal rule`) — it posts to your API |
+| Auth, workspaces, API keys | CLI and pre-commit hook, `copal sync-context` |
+| Storage of what clients send to `/api/public/v1` | MCP server, Claude Code hook, VS Code and JetBrains plugins |
+| Thin `/v1` endpoints: validate, store, then **call the core function** and return its result | Reference server + `scripts/api-test.mjs` (the contract) |
+
+Concretely: `/v1/rules/health` = load the project's policy, analyses and feedback events from your DB, then
+`return ruleHealth({ policy, analyses, events, project, days })`. `/v1/reach` = `reach({ analyses, sessions,
+navigator, heartbeats, project })`. `/v1/rules/drafts` only stores and lists what the bot posts. `/v1/coach/reflect`
+calls `navigatorQuestions` and `/answers` calls `buildBrief`. All are exported by core-v0.2.0+ — import them, never
+re-implement definitions such as "caught late" or "noisy". If a calculation seems missing, ask for it to be added to
+core rather than writing it in the app.
+
 ## Goal and rule
 Copal helps developers prompt AI better — better results, less slop, fewer tokens — and understand the code they ship.
 **The dashboard answers only the questions a lead asks every week, with data Copal has today, and every row leads to
@@ -12,7 +28,7 @@ no PR inbox (PRs are handled in GitHub/GitLab), no per-person scoring, no cost-p
 ## Non-negotiables
 - /api/public/v1 must keep passing scripts/api-test.mjs (github.com/benoitrion/copal-sandbox): now 34 checks
   (25 contract + 9 coaching). Reference implementation: apps/mock-server in copal-sandbox.
-- Engine: @copal/core core-v0.2.0 (https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.2.0/packages/core/esm/copal-core.mjs).
+- Engine: @copal/core **core-v0.3.0** (https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.3.0/packages/core/esm/copal-core.mjs) — adds `ruleHealth`, `reach`, `draftRuleFromReview`, smells. Until that release exists, pin the commit given to you.
 - Never display or log API keys/secrets. No app content depends on the "Add VAT" example.
 
 ## Navigation (final)

@@ -1,4 +1,4 @@
-/*! @copal/core 0.2.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
+/*! @copal/core 0.3.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
 // ---- types
 export type Mode = "audit" | "enforce" | "off";
 /** Policy-wide stance (v4). `coach` (default): hints lead with a question and fixes are only shown on request. */
