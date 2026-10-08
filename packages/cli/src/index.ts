@@ -20,6 +20,9 @@ Usage:
   copal hook install [--env ENV] | hook uninstall         Manage the git pre-commit hook
   copal hook install --claude                             Add the navigator to Claude Code (UserPromptSubmit hook)
   copal claude-hook                                       (called by Claude Code) prompt JSON on stdin → navigator context
+  copal sync-context [--check] [--targets claude,agents,cursor,copilot]
+                                                          Write the team's rules into CLAUDE.md, AGENTS.md, Cursor and Copilot
+                                                          instruction files (managed block); --check exits 1 when out of date
   copal rules [PATH] [--env ENV]                          Rules that apply to PATH (agent guidance)
   copal redact [FILE]                                     Print FILE/stdin with secrets removed
   copal feedback ANALYSIS_ID RULE_ID [--note TEXT]        Mark a finding as false positive
@@ -36,7 +39,7 @@ function parseArgs(argv: string[]): { cmd: string[]; flags: Flags } {
     if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=", 2);
       if (v !== undefined) flags[k] = v;
-      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith("--") && !["staged", "all", "json", "fix", "show-me", "audit", "local", "create-key", "help", "claude", "skip"].includes(k)) flags[k] = argv[++i];
+      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith("--") && !["staged", "all", "json", "fix", "show-me", "audit", "local", "create-key", "help", "claude", "skip", "check"].includes(k)) flags[k] = argv[++i];
       else flags[k] = true;
     } else cmd.push(a);
   }
@@ -252,6 +255,72 @@ async function claudeHook(): Promise<number> {
   return 0;
 }
 
+const SYNC_TARGETS: Record<string, { file: string; header?: string }> = {
+  claude: { file: "CLAUDE.md" },
+  agents: { file: "AGENTS.md" },
+  cursor: { file: ".cursor/rules/copal.mdc", header: "---\ndescription: Team engineering rules from .copalrules (managed by Copal)\nalwaysApply: true\n---\n" },
+  copilot: { file: ".github/copilot-instructions.md" },
+};
+const BEGIN = "<!-- copal:begin (generated from .copalrules — edit the rules, not this block) -->";
+const END = "<!-- copal:end -->";
+
+/** The block every agent reads: rules, boundaries, questions to ask the developer, and how to work. */
+function contextBlock(repo: ReturnType<typeof loadRepoPolicy>): string {
+  const rules = repo.policy.rules.filter((r) => r.mode !== "off");
+  const lines = [BEGIN, `## Team engineering rules (${repo.project})`, ""];
+  lines.push("Follow these rules when writing code in this repository. ENFORCED rules block the commit and the PR check.");
+  lines.push("");
+  for (const r of rules) {
+    const what = r.deny ? `Do not import across ${r.deny}` : r.secrets ? "Never hard-code credentials" : r.dependencies ? `Only approved dependencies: ${r.dependencies.allow?.join(", ") || "any"}${r.dependencies.deny?.length ? `; never ${r.dependencies.deny.join(", ")}` : ""}` : r.requireTest ? `Changes need a test matching ${r.requireTest.test}` : r.message ?? r.id;
+    lines.push(`- **${r.id}**${r.mode === "enforce" ? " (ENFORCED)" : ""}: ${what}.${r.why ? ` ${r.why}` : ""}${r.coach?.reference ? ` See ${r.coach.reference}.` : ""}`);
+  }
+  const qs = rules.filter((r) => r.coach?.question);
+  if (qs.length) {
+    lines.push("", "### Ask the developer first", "When your change touches one of these rules, ask the question instead of silently deciding:");
+    for (const r of qs) lines.push(`- ${r.id}: ${r.coach!.question}`);
+  }
+  lines.push(
+    "",
+    "### How to work",
+    "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong. Then work test-first in small steps.",
+    "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
+    END,
+  );
+  return lines.join("\n");
+}
+
+function syncContext(flags: Flags): number {
+  const repo = loadRepoPolicy(process.cwd());
+  const block = contextBlock(repo);
+  const targets = String(flags.targets ?? "claude,agents,cursor,copilot").split(",").map((t) => t.trim()).filter(Boolean);
+  let stale = 0;
+  for (const t of targets) {
+    const target = SYNC_TARGETS[t];
+    if (!target) return console.error(`unknown target "${t}" (claude, agents, cursor, copilot)`), 2;
+    const file = path.join(repo.root, target.file);
+    const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    const rx = new RegExp(`${BEGIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?${END}`);
+    const next = rx.test(current) ? current.replace(rx, block) : `${current || target.header || ""}${current && !current.endsWith("\n") ? "\n" : ""}${current ? "\n" : ""}${block}\n`;
+    if (next === current) {
+      console.log(dim(`= ${target.file} up to date`));
+      continue;
+    }
+    stale++;
+    if (flags.check) {
+      console.log(yellow(`✗ ${target.file} is out of date with .copalrules`));
+      continue;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, next);
+    console.log(green(`✔ ${target.file} ${current ? "updated" : "created"}`));
+  }
+  if (flags.check && stale) {
+    console.log(dim("Run `copal sync-context` and commit the result."));
+    return 1;
+  }
+  return 0;
+}
+
 function installClaudeHook(): number {
   let root = process.cwd();
   try {
@@ -324,6 +393,8 @@ async function main(): Promise<number> {
       return reflect(cmd.slice(1).join(" "), flags);
     case "claude-hook":
       return claudeHook();
+    case "sync-context":
+      return syncContext(flags);
     case "event": {
       const [, ruleId, level, action] = cmd;
       if (!ruleId || !level || !action) return console.error("usage: copal event RULE_ID LEVEL ACTION"), 2;

@@ -129,6 +129,8 @@ rules:
     fix: { with: "LedgerPort.round($1, Currency.EUR)" }        # niveau 4 — « Show me » seulement
 ```
 
+**Agents** : `copal sync-context` écrit les règles dans `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/copal.mdc` et `.github/copilot-instructions.md` (bloc géré ; `--check` en CI échoue s'ils sont périmés).
+
 **Claude Code** : `copal hook install --claude` ajoute un hook `UserPromptSubmit` — pour une tâche de taille « feature », Claude pose d'abord les questions du navigator puis travaille test d'abord. Avec MCP, l'agent appelle `copal_reflect` puis `copal_brief`.
 
 ### v3 (toujours supporté)
@@ -209,6 +211,8 @@ En-tête `x-api-key: copal_dev_local` sur `/v1/*`. Les endpoints documentés de 
 | GET | `/v1/growth` | Niveau médian nécessaire par catégorie et par semaine, récurrences, taux de réponse |
 | GET / POST | `/v1/katas` | Bibliothèque (katas canoniques crédités) + suggestions par récurrence |
 | POST | `/v1/katas/generate`, `/v1/katas/:id/complete` | Micro-kata depuis un finding ; complétion |
+| GET | `/v1/rules/health` | Par règle : hits, tendance, part « caught late » (vue d'abord en PR/CI), taux de faux positifs, statut (recurring · noisy · caught-late · silent · uncoached) |
+| GET | `/v1/reach` | Dernière activité par surface (pre-commit, PR, agents MCP, navigator, IDE) |
 | GET | `/v1/usage` | Tokens et coût par changement mergé, avec vs sans navigator |
 
 Options : `--port 4010`, `--project dir1,dir2` (projets préchargés), `--persist data/state.json`.

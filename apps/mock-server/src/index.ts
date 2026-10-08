@@ -315,6 +315,12 @@ router.post("/v1/katas/:id/complete", ({ params, body, res }) => {
   return undefined;
 });
 
+router.get("/v1/rules/health", ({ query }) => {
+  const project = query.get("project") ?? Object.keys(store.state.projects)[0];
+  return store.ruleHealth(project, store.state.projects[project]?.policy, Number(query.get("days") ?? 30));
+});
+router.get("/v1/reach", ({ query }) => store.reach(query.get("project") ?? undefined));
+
 router.get("/v1/usage", ({ query }) => store.usage(query.get("project") ?? undefined, query.get("since") ?? undefined));
 
 // ------------------------------------------------------------------ console

@@ -243,6 +243,21 @@ if (WRITES) {
     return `${u.sessions} sessions, ${u.tokensPerMergedChange ?? "–"} tokens/merged change`;
   });
 }
+await check("coach", "GET /v1/rules/health: hits, caught late, false positives and status per rule", async () => {
+  const { json } = await coachApi("GET", "/v1/rules/health?project=billing-api&days=30");
+  assert(Array.isArray(json.rules) && json.rules.length === policy.rules.length, `expected one row per rule (${policy.rules.length}), got ${json.rules?.length}`);
+  for (const r of json.rules) {
+    for (const k of ["ruleId", "hits", "trend", "caughtLate", "falsePositiveRate", "status"]) assert(k in r, `rule row missing ${k}`);
+    assert(r.caughtLate === null || (r.caughtLate >= 0 && r.caughtLate <= 1), "caughtLate must be a share 0–1 or null");
+  }
+  const flagged = json.rules.filter((r) => r.status.length).map((r) => `${r.ruleId}:${r.status.join("+")}`);
+  return flagged.slice(0, 3).join(", ") || "no rule needs attention";
+});
+await check("coach", "GET /v1/reach: last seen per surface", async () => {
+  const { json } = await coachApi("GET", "/v1/reach?project=billing-api");
+  for (const k of ["precommit", "prCheck", "agentSelfCheck", "agents", "navigator"]) assert(k in json, `reach.${k} missing`);
+  return `pre-commit ${json.precommit.lastSeen ? "seen" : "not seen"}, PR check ${json.prCheck.lastSeen ? "seen" : "not seen"}`;
+});
 await check("coach", "GET /v1/katas lists credited canonical katas", async () => {
   const { json } = await coachApi("GET", "/v1/katas?project=billing-api");
   const list = Array.isArray(json) ? json : json.katas;
