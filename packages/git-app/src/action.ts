@@ -39,6 +39,9 @@ async function main(): Promise<number> {
     ...result.findings.map((f) => `- ${f.blocking ? "⛔" : "⚠️"} \`${f.ruleId}\` ${f.file}:${f.line} — ${f.message}`),
   ];
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+  // Annotation: visible on the run page and through the checks API, unlike step summaries.
+  const where = result.mode === "remote" ? `recorded as ${result.analysisId} on ${new URL(client.cfg.serverUrl!).host}` : "local engine, not recorded";
+  console.log(`::notice title=Copal::${result.summary.blocking} blocking, ${result.summary.audit} audit (${where})`);
   console.log(lines.join("\n"));
   return result.blocking && process.env.COPAL_FAIL_ON_BLOCKING !== "0" ? 1 : 0;
 }
