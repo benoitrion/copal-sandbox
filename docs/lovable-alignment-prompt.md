@@ -17,8 +17,8 @@ All of them talk to the HTTP API described below. The API contract is the source
 
 A running reference backend (the mock in `apps/mock-server`) is available for comparison. Compare your responses with it field by field.
 
-- Reference mock: `<REFERENCE_MOCK_URL>`
-- API key: ask me for it.
+- Reference mock: the latest URL and API key are posted in https://github.com/benoitrion/copal-sandbox/issues/1.
+- It is a temporary demo server, restarted through *Actions → demo-server*.
 
 ## 1. Reuse the rule engine, do not rewrite it
 
