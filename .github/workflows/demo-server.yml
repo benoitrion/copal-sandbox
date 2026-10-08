@@ -1,0 +1,84 @@
+name: demo-server
+# Temporary public demo of the Copal mock backend (:4010) and billing-api (:3000) for testing the plugins.
+# Runs on a GitHub Actions runner and is exposed through Cloudflare quick tunnels (random *.trycloudflare.com URLs).
+# Stops after `minutes` (max 330). For a durable URL use Codespaces or Render (see README).
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to keep the servers up (minutes, max 330)"
+        default: "120"
+        required: true
+
+concurrency:
+  group: demo-server
+  cancel-in-progress: true
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install and build
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          npm install --prefix examples/billing-api --no-audit --no-fund
+
+      - name: Start backend and billing-api
+        env:
+          # Set the repository secret COPAL_MOCK_DEV_KEY to choose the key; otherwise a random one is generated.
+          COPAL_MOCK_DEV_KEY: ${{ secrets.COPAL_MOCK_DEV_KEY }}
+        run: bash scripts/serve-hosted.sh
+
+      - name: Open tunnels
+        run: |
+          curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+          ./cloudflared tunnel --no-autoupdate --url http://localhost:4010 > tunnel-backend.log 2>&1 &
+          ./cloudflared tunnel --no-autoupdate --url http://localhost:3000 > tunnel-app.log 2>&1 &
+          for i in $(seq 1 60); do
+            B=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel-backend.log | head -1 || true)
+            A=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel-app.log | head -1 || true)
+            [ -n "$B" ] && [ -n "$A" ] && break
+            sleep 2
+          done
+          echo "BACKEND_URL=$B" >> "$GITHUB_ENV"
+          echo "APP_URL=$A" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do curl -sf "$B/healthz" >/dev/null && break; sleep 2; done
+
+      - name: Publish URLs
+        env:
+          HAS_SECRET: ${{ secrets.COPAL_MOCK_DEV_KEY != '' }}
+        run: |
+          # Without the secret, a random throwaway key is generated and shown here (visible to anyone who can read this run).
+          if [ "$HAS_SECRET" = "true" ]; then KEY="(repository secret COPAL_MOCK_DEV_KEY)"; else KEY=$(cat .data/dev-key); fi
+          END=$(date -u -d "+${{ inputs.minutes }} minutes" +%H:%MZ)
+          echo "::notice title=Copal backend::$BACKEND_URL (console at /, key below, up until $END)"
+          echo "::notice title=billing-api::$APP_URL/health"
+          echo "::notice title=API key::$KEY"
+          {
+            echo "## Copal demo servers (until $END)"
+            echo "| | URL |"
+            echo "|---|---|"
+            echo "| Backend + console | $BACKEND_URL |"
+            echo "| billing-api | $APP_URL/health |"
+            echo "| PR webhooks | $BACKEND_URL/webhooks/github · $BACKEND_URL/webhooks/gitlab |"
+            echo
+            echo '```bash'
+            echo "export COPAL_SERVER=$BACKEND_URL COPAL_API_KEY=$KEY"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep alive
+        run: |
+          MIN=${{ inputs.minutes }}; [ "$MIN" -gt 330 ] && MIN=330
+          END=$(( $(date +%s) + MIN * 60 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            sleep 300
+            curl -sf localhost:4010/healthz >/dev/null && echo "$(date -u +%H:%M) backend up" || echo "backend down"
+          done
