@@ -262,7 +262,11 @@ export declare function reportToMarkdown(r: Report, title?: string): string;
  * Markdown body for one inline review comment — a hint card: question first, explanation folded,
  * fix ("Show me") folded and never as a one-click suggestion when the rule has coaching.
  */
-export declare function findingToMarkdown(f: Finding): string;
+export declare function findingToMarkdown(f: Finding, opts?: {
+    referenceBase?: string;
+}): string;
+/** A repo-relative reference becomes a link to that file at the reviewed commit; URLs stay links. */
+export declare function referenceLink(ref: string, base?: string): string;
 /** Rules rendered as agent guidance (MCP). */
 export declare function rulesToGuidance(rules: Rule[], filePath?: string): string;
 export {};

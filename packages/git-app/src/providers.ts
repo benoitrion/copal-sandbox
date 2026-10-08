@@ -92,6 +92,11 @@ export class GitHubProvider implements GitProvider {
   private api(p: string) {
     return `${this.cfg.apiUrl}/repos/${this.repo}${p}`;
   }
+  /** Web URL of the repo at a commit (github.com, GitHub Enterprise, or GITHUB_SERVER_URL in Actions). */
+  private blobBase(sha: string): string | undefined {
+    const web = process.env.GITHUB_SERVER_URL ?? (this.cfg.apiUrl === "https://api.github.com" ? "https://github.com" : this.cfg.apiUrl.endsWith("/api/v3") ? this.cfg.apiUrl.slice(0, -7) : undefined);
+    return web ? `${web}/${this.repo}/blob/${sha}/` : undefined;
+  }
 
   async load(): Promise<ChangeSet> {
     const headers = await this.h();
@@ -126,7 +131,7 @@ export class GitHubProvider implements GitProvider {
         commit_id: sha,
         event: report.blocking ? "REQUEST_CHANGES" : "COMMENT",
         body: reportToMarkdown(report),
-        comments: findings.map((f) => ({ path: f.file, line: f.line, side: "RIGHT", body: findingToMarkdown(f) })),
+        comments: findings.map((f) => ({ path: f.file, line: f.line, side: "RIGHT", body: findingToMarkdown(f, { referenceBase: this.blobBase(sha) }) })),
       }),
     });
   }
@@ -159,6 +164,10 @@ export class GitLabProvider implements GitProvider {
   }
   private api(p: string) {
     return `${this.cfg.apiUrl}/projects/${encodeURIComponent(this.project)}${p}`;
+  }
+  private blobBase(): string | undefined {
+    if (!this.refs?.head_sha || /^\d+$/.test(this.project) || !this.cfg.apiUrl.endsWith("/api/v4")) return undefined;
+    return `${this.cfg.apiUrl.slice(0, -7)}/${this.project}/-/blob/${this.refs.head_sha}/`;
   }
 
   async load(): Promise<ChangeSet> {
@@ -196,7 +205,7 @@ export class GitLabProvider implements GitProvider {
         method: "POST",
         headers: this.h(),
         body: JSON.stringify({
-          body: findingToMarkdown(f).replace("```suggestion", "```suggestion:-0+0"),
+          body: findingToMarkdown(f, { referenceBase: this.blobBase() }).replace("```suggestion", "```suggestion:-0+0"),
           position: { position_type: "text", base_sha: this.refs?.base_sha, start_sha: this.refs?.start_sha, head_sha: this.refs?.head_sha, new_path: f.file, old_path: f.file, new_line: f.line },
         }),
       });

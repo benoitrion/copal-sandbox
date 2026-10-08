@@ -74,14 +74,14 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
  * Markdown body for one inline review comment — a hint card: question first, explanation folded,
  * fix ("Show me") folded and never as a one-click suggestion when the rule has coaching.
  */
-export function findingToMarkdown(f: Finding): string {
+export function findingToMarkdown(f: Finding, opts: { referenceBase?: string } = {}): string {
   const card = hintCard(f);
   const head = f.blocking ? "⛔ Copal (blocking)" : f.coach ? "💬 Copal coach" : "⚠️ Copal (audit)";
   const out = [`**${head}** · \`${f.ruleId}\``, "", f.message];
   if (card.question) out.push("", `**${card.question}**`);
   const explain: string[] = [];
   if (f.why) explain.push(f.why);
-  if (card.reference) explain.push(`Reference: ${card.reference}`);
+  if (card.reference) explain.push(`Reference: ${referenceLink(card.reference, opts.referenceBase)}`);
   if (card.example?.bad) explain.push(`Instead of: \`${card.example.bad}\``);
   if (card.example?.good) explain.push(`Prefer: \`${card.example.good}\``);
   if (explain.length) out.push("", f.coach ? `<details><summary>Explain</summary>\n\n${explain.join("\n\n")}\n\n</details>` : `> ${explain.join("\n> ")}`);
@@ -90,6 +90,13 @@ export function findingToMarkdown(f: Finding): string {
   if (card.kata) out.push("", `<sub>Practice: ${card.kata}${card.learningHour ? ` · learning hour: ${card.learningHour}` : ""}</sub>`);
   if (f.sources?.length) out.push("", `<sub>Sources: ${f.sources.join(" · ")}</sub>`);
   return out.join("\n");
+}
+
+/** A repo-relative reference becomes a link to that file at the reviewed commit; URLs stay links. */
+export function referenceLink(ref: string, base?: string): string {
+  if (/^https?:\/\//.test(ref)) return `[${ref.replace(/^https?:\/\//, "")}](${ref})`;
+  if (!base) return `\`${ref}\``;
+  return `[${ref}](${base.replace(/\/?$/, "/")}${ref.replace(/^\.?\//, "").split("/").map(encodeURIComponent).join("/")})`;
 }
 
 /** Rules rendered as agent guidance (MCP). */

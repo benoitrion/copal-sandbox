@@ -1134,14 +1134,14 @@ function reportToMarkdown(r, title = "Copal check") {
   out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
   return out.join("\n");
 }
-function findingToMarkdown(f) {
+function findingToMarkdown(f, opts = {}) {
   const card = hintCard(f);
   const head = f.blocking ? "\u26D4 Copal (blocking)" : f.coach ? "\u{1F4AC} Copal coach" : "\u26A0\uFE0F Copal (audit)";
   const out = [`**${head}** \xB7 \`${f.ruleId}\``, "", f.message];
   if (card.question) out.push("", `**${card.question}**`);
   const explain = [];
   if (f.why) explain.push(f.why);
-  if (card.reference) explain.push(`Reference: ${card.reference}`);
+  if (card.reference) explain.push(`Reference: ${referenceLink(card.reference, opts.referenceBase)}`);
   if (card.example?.bad) explain.push(`Instead of: \`${card.example.bad}\``);
   if (card.example?.good) explain.push(`Prefer: \`${card.example.good}\``);
   if (explain.length) out.push("", f.coach ? `<details><summary>Explain</summary>
@@ -1160,6 +1160,11 @@ ${card.fix}
   if (card.kata) out.push("", `<sub>Practice: ${card.kata}${card.learningHour ? ` \xB7 learning hour: ${card.learningHour}` : ""}</sub>`);
   if (f.sources?.length) out.push("", `<sub>Sources: ${f.sources.join(" \xB7 ")}</sub>`);
   return out.join("\n");
+}
+function referenceLink(ref, base2) {
+  if (/^https?:\/\//.test(ref)) return `[${ref.replace(/^https?:\/\//, "")}](${ref})`;
+  if (!base2) return `\`${ref}\``;
+  return `[${ref}](${base2.replace(/\/?$/, "/")}${ref.replace(/^\.?\//, "").split("/").map(encodeURIComponent).join("/")})`;
 }
 function rulesToGuidance(rules, filePath) {
   if (!rules.length) return `No Copal rules apply${filePath ? ` to ${filePath}` : ""}.`;
@@ -1209,6 +1214,7 @@ export {
   parseYamlSubset,
   red,
   redact,
+  referenceLink,
   reportToMarkdown,
   resolvePolicy,
   ruleSummary,

@@ -12,6 +12,7 @@ import {
   parsePolicy,
   resolvePolicy,
   taskScope,
+  referenceLink,
   validatePolicy,
 } from "../src";
 
@@ -128,4 +129,10 @@ test("kata escalation per developer and learning hour per team", () => {
   assert.ok(s.some((x) => x.ruleId === "domain-no-infra" && x.developer === "bob" && x.kata?.includes("birthday_greetings")));
   assert.ok(s.some((x) => x.ruleId === "domain-no-infra" && !x.developer && x.learningHour === "ports-and-adapters"));
   assert.ok(!s.some((x) => x.developer === "old"));
+});
+
+test("references link to the file at the reviewed commit", () => {
+  assert.equal(referenceLink("docs/rules/a.md"), "`docs/rules/a.md`");
+  assert.equal(referenceLink("docs/rules/a.md", "https://github.com/o/r/blob/abc"), "[docs/rules/a.md](https://github.com/o/r/blob/abc/docs/rules/a.md)");
+  assert.equal(referenceLink("https://wiki.example.com/x"), "[wiki.example.com/x](https://wiki.example.com/x)");
 });
