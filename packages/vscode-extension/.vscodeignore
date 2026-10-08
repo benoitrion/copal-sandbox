@@ -1,0 +1,9 @@
+src/**
+test/**
+typings/**
+dist/test/**
+**/*.map
+**/*.ts
+!node_modules/@copal/core/dist/src/*.d.ts
+tsconfig*.json
+.vscode/**

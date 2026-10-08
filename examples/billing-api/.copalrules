@@ -1,0 +1,58 @@
+# Copal policy for the billing-api mock application.
+# Same file is used by Copal MCP, the pre-commit hook and the PR/MR check.
+version: 3
+project: billing-api
+extends:
+  - builtin:security
+  - builtin:quality
+
+# Extra context removed before anything reaches an agent or a model.
+redact:
+  - name: customer-iban
+    pattern: "BE\\d{14}"
+
+rules:
+  - id: ui-no-persistence
+    category: architecture
+    mode: enforce
+    deny: "src/web/** -> src/persistence/**"
+    why: "Keep persistence behind the API boundary: controllers call services, services call ports."
+    sources: [ADR-007 layering]
+
+  - id: ledger-rounding
+    category: architecture
+    mode: enforce
+    severity: error
+    paths: ["src/**/*.ts"]
+    exclude: ["src/ports/**"]
+    pattern: "Math\\.round\\(\\s*(\\w+)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
+    fix:
+      with: "LedgerPort.round($1, Currency.EUR)"
+    message: "Inline rounding bypasses LedgerPort"
+    why: "Rounding in one place keeps invoices and the ledger reconciled."
+    sources: [rule ledger-rounding, Jira FIN-402]
+
+  - id: approved-dependencies
+    category: dependency
+    mode: enforce
+    dependencies:
+      allow: ["@billing/*", "zod", "pino", "fastify", "decimal.js", "typescript", "@types/*", "vitest"]
+      deny: [moment, left-pad, request]
+    why: "New packages need a security and licence review (#platform-deps)."
+
+  - id: invoice-contract-test
+    category: testing
+    mode: audit
+    paths: ["src/invoice/*.ts"]
+    requireTest:
+      test: "src/invoice/{name}.test.ts"
+    why: "Invoice maths is contract-tested against the ledger fixtures."
+
+environments:
+  ci:
+    rules:
+      no-explicit-any: { mode: enforce }
+      invoice-contract-test: { mode: enforce }
+  local:
+    rules:
+      no-console: { mode: audit }

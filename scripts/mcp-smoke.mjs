@@ -1,0 +1,24 @@
+// Minimal MCP client: node scripts/mcp-smoke.mjs [repoDir] — lists tools and asks for rules of a file.
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const cwd = path.resolve(process.argv[2] ?? path.join(root, "examples/billing-api"));
+const p = spawn(process.execPath, [path.join(root, "packages/mcp-server/dist/src/index.js")], { cwd, stdio: ["pipe", "pipe", "inherit"] });
+const rl = createInterface({ input: p.stdout });
+const pending = new Map();
+rl.on("line", (l) => { const m = JSON.parse(l); pending.get(m.id)?.(m); });
+let id = 0;
+const call = (method, params) => new Promise((res) => { const i = ++id; pending.set(i, res); p.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: i, method, params }) + "\n"); });
+const init = await call("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "smoke", version: "0" } });
+p.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+console.log("server:", init.result.serverInfo, "protocol", init.result.protocolVersion);
+console.log("tools:", (await call("tools/list", {})).result.tools.map((t) => t.name).join(", "));
+const r = await call("tools/call", { name: "copal_get_rules", arguments: { path: "src/web/invoice-controller.ts" } });
+console.log("\n" + r.result.content[0].text);
+const c = await call("tools/call", { name: "copal_check_code", arguments: { path: "src/web/x.ts", content: 'import { InvoiceRepo } from "../persistence/invoice-repo";\n' } });
+console.log("\n" + c.result.content[0].text);
+const sess = await call("tools/call", { name: "copal_report_session", arguments: { agent: "smoke-agent", tokens: 18250 } });
+console.log("\n" + sess.result.content[0].text);
+p.stdin.end();

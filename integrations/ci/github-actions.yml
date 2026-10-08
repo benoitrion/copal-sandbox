@@ -1,0 +1,17 @@
+# Alternative "sans app" au check PR : à copier dans .github/workflows/copal.yml
+# (l'app GitHub de packages/git-app ajoute en plus les commentaires inline et le feedback /copal).
+name: copal
+on: pull_request
+jobs:
+  copal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i -g ./tools/copal-cli   # ou votre registre interne : npm i -g @copal/cli
+      - run: copal check --base origin/${{ github.base_ref }} --env ci
+        env:
+          COPAL_SERVER: ${{ vars.COPAL_SERVER }}
+          COPAL_API_KEY: ${{ secrets.COPAL_API_KEY }}

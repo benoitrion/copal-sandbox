@@ -1,0 +1,10 @@
+# For the pre-commit framework (https://pre-commit.com):
+#   repos:
+#     - repo: local
+#       hooks: [{ id: copal, name: copal, entry: copal check --staged, language: system, pass_filenames: false }]
+- id: copal
+  name: Copal policy check
+  entry: copal check --staged
+  language: node
+  pass_filenames: false
+  always_run: true

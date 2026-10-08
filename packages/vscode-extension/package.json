@@ -1,0 +1,65 @@
+{
+  "name": "copal-vscode",
+  "displayName": "Copal.dev",
+  "description": "Affiche les findings Copal (.copalrules) dans l'éditeur, avec corrections rapides.",
+  "version": "0.1.0",
+  "publisher": "copal",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "main": "./dist/src/extension.js",
+  "activationEvents": [
+    "workspaceContains:.copalrules",
+    "onLanguage:typescript",
+    "onLanguage:javascript"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "copal.checkFile",
+        "title": "Copal: Vérifier le fichier courant"
+      },
+      {
+        "command": "copal.checkWorkspace",
+        "title": "Copal: Vérifier le workspace"
+      },
+      {
+        "command": "copal.setApiKey",
+        "title": "Copal: Définir la clé API"
+      },
+      {
+        "command": "copal.showRules",
+        "title": "Copal: Afficher les règles applicables"
+      }
+    ],
+    "configuration": {
+      "title": "Copal",
+      "properties": {
+        "copal.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:4010",
+          "description": "URL du backend Copal (mock local par défaut). Vide = moteur local uniquement."
+        },
+        "copal.environment": {
+          "type": "string",
+          "default": "local",
+          "description": "Environnement de politique (local, ci, ...)."
+        },
+        "copal.checkOnSave": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "bash scripts-package.sh"
+  },
+  "dependencies": {
+    "@copal/core": "0.1.0"
+  }
+}

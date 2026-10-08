@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "copal": {
+      "command": "node",
+      "args": ["../../packages/mcp-server/dist/src/index.js"],
+      "env": { "COPAL_SERVER": "http://localhost:4010", "COPAL_API_KEY": "copal_dev_local", "COPAL_ENV": "local" }
+    }
+  }
+}

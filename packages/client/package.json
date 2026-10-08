@@ -1,0 +1,9 @@
+{
+  "name": "@copal/client",
+  "version": "0.1.0",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "dependencies": {
+    "@copal/core": "0.1.0"
+  }
+}

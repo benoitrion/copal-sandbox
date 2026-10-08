@@ -1,0 +1,8 @@
+{
+  "name": "@copal/mock-server",
+  "version": "0.1.0",
+  "main": "dist/src/index.js",
+  "dependencies": {
+    "@copal/core": "0.1.0"
+  }
+}

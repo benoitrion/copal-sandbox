@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.vsix
+apps/mock-server/data/

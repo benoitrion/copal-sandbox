@@ -1,0 +1,15 @@
+{
+  "name": "Copal (sandbox)",
+  "url": "https://copal.lovable.app",
+  "hook_attributes": { "url": "https://YOUR-TUNNEL.example.com/webhooks/github" },
+  "redirect_url": "https://copal.lovable.app",
+  "public": false,
+  "default_permissions": {
+    "pull_requests": "write",
+    "statuses": "write",
+    "contents": "read",
+    "issues": "write",
+    "metadata": "read"
+  },
+  "default_events": ["pull_request", "issue_comment"]
+}

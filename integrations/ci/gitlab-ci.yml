@@ -1,0 +1,9 @@
+# À inclure dans .gitlab-ci.yml
+copal:
+  image: node:22
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - npm i -g ./tools/copal-cli
+    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    - copal check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --env ci

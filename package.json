@@ -1,0 +1,31 @@
+{
+  "name": "copal-sandbox",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mock app + backend simulé + plugins d'intégration Copal (MCP, pré-commit, GitHub/GitLab, VS Code)",
+  "workspaces": [
+    "packages/core",
+    "packages/client",
+    "packages/cli",
+    "packages/mcp-server",
+    "packages/git-app",
+    "packages/vscode-extension",
+    "apps/mock-server"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/core packages/client packages/cli packages/mcp-server packages/git-app packages/vscode-extension apps/mock-server",
+    "test": "npm run build && node --test packages/core/dist/test/*.test.js packages/git-app/dist/test/*.test.js packages/vscode-extension/dist/test/*.test.js",
+    "mock-server": "node apps/mock-server/dist/index.js",
+    "e2e": "bash scripts/e2e.sh",
+    "git-app": "node packages/git-app/dist/src/server.js",
+    "mcp": "node packages/mcp-server/dist/src/index.js",
+    "copal": "node packages/cli/dist/src/index.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
