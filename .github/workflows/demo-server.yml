@@ -53,7 +53,16 @@ jobs:
           done
           echo "BACKEND_URL=$B" >> "$GITHUB_ENV"
           echo "APP_URL=$A" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do curl -sf "$B/healthz" >/dev/null && break; sleep 2; done
+          # Verify through the public URLs (DNS for new tunnels can take a few seconds).
+          OK_B=no; OK_A=no
+          for i in $(seq 1 45); do
+            [ $OK_B = no ] && curl -sf "$B/healthz" >/dev/null && OK_B=yes
+            [ $OK_A = no ] && curl -sf "$A/health" >/dev/null && OK_A=yes
+            [ $OK_B = yes ] && [ $OK_A = yes ] && break
+            sleep 2
+          done
+          echo "VERIFIED=backend $OK_B, billing-api $OK_A" >> "$GITHUB_ENV"
+          echo "public check: backend $OK_B, billing-api $OK_A"
 
       - name: Publish URLs
         env:
@@ -73,6 +82,8 @@ jobs:
             echo "| Backend + console | $BACKEND_URL |"
             echo "| billing-api | $APP_URL/health |"
             echo "| PR webhooks | $BACKEND_URL/webhooks/github · $BACKEND_URL/webhooks/gitlab |"
+            echo
+            echo "Reachability checked from the runner through the public URLs: $VERIFIED"
             echo
             echo '```bash'
             echo "export COPAL_SERVER=$BACKEND_URL COPAL_API_KEY=$KEY"
