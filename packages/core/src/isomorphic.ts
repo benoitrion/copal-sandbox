@@ -9,3 +9,4 @@ export * from "./policy";
 export * from "./diff";
 export * from "./engine";
 export * from "./format";
+export * from "./coach";

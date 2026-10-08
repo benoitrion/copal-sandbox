@@ -191,6 +191,67 @@ await check("agent", "POST /v1/plan lists enforced constraints", async () => {
   return `${p.steps.length} steps, ${p.constraints.length} constraints`;
 });
 
+group("Coaching (v4: navigator, hint ladder, katas, AI usage) — skipped on servers that predate it");
+/** Calls a v4 endpoint; a 404 means the server hasn't implemented coaching yet → Skip, not failure. */
+async function coachApi(method, route, body) {
+  const r = await api(method, route, body, { raw: true });
+  if (r.status === 404 && !/unknown (navigator session|kata|finding)/.test(r.text)) throw new Skip(`${method} ${route.split("?")[0]} not implemented yet`);
+  if (r.status >= 400) throw new Error(`${method} ${route} → ${r.status} ${r.text.slice(0, 160)}`);
+  return r;
+}
+let navSession;
+await check("coach", "POST /v1/coach/reflect asks ≤ 3 code-free questions for a feature", async () => {
+  const { json } = await coachApi("POST", "/v1/coach/reflect", { project: "billing-api", task: "Add VAT calculation to invoice totals for EU customers" });
+  assert(typeof json.sessionId === "string" && json.sessionId, "sessionId missing");
+  assert(Array.isArray(json.questions) && json.questions.length >= 1 && json.questions.length <= 3, `expected 1–3 questions, got ${json.questions?.length}`);
+  for (const q of json.questions) {
+    assert(["first-example", "placement", "risk"].includes(q.kind), `unknown question kind ${q.kind}`);
+    assert(!core.containsCode(q.text), `question contains code: ${q.text}`);
+  }
+  navSession = json;
+  return `${json.questions.length} questions (${json.questions.map((q) => q.kind).join(", ")})`;
+});
+await check("coach", "POST /v1/coach/reflect stays quiet for a small task", async () => {
+  const { json } = await coachApi("POST", "/v1/coach/reflect", { project: "billing-api", task: "fix typo in README" });
+  assert((json.questions ?? []).length === 0, "small tasks must not trigger the navigator");
+  return "no questions";
+});
+await check("coach", "POST /v1/coach/reflect/:id/answers returns a test-first brief", async () => {
+  if (!navSession) throw new Skip("no navigator session");
+  const first = navSession.questions.find((q) => q.kind === "first-example") ?? navSession.questions[0];
+  const { json } = await coachApi("POST", `/v1/coach/reflect/${navSession.sessionId}/answers`, { answers: [{ id: first.id, text: "100 EUR net in BE gives 121 EUR gross" }] });
+  assert(json.brief && json.brief.firstTest === "100 EUR net in BE gives 121 EUR gross", "brief.firstTest must echo the developer's example");
+  assert(Array.isArray(json.brief.edgeCases) && Array.isArray(json.brief.rules), "brief.edgeCases[] and brief.rules[] required");
+  return `brief with ${json.brief.rules.length} rules`;
+});
+if (WRITES) {
+  await check("coach", "POST /v1/coach/events records ladder steps; GET /v1/growth aggregates them", async () => {
+    const ev = { project: "billing-api", developer: "api-test", ruleId: "ledger-rounding", category: "architecture", levelReached: 2, action: "explain", source: "cli" };
+    const r = await coachApi("POST", "/v1/coach/events", ev);
+    assert(r.status === 204 || r.status === 200, `expected 204, got ${r.status}`);
+    const bad = await api("POST", "/v1/coach/events", { ...ev, levelReached: 9 }, { raw: true });
+    assert(bad.status === 400 || bad.status === 422, `levelReached 9 must be rejected (got ${bad.status})`);
+    const g = (await coachApi("GET", "/v1/growth?project=billing-api&developer=api-test")).json;
+    const cat = (g.categories ?? []).find((c) => c.category === "architecture");
+    assert(cat && Array.isArray(cat.weekly) && cat.weekly.length, "growth.categories[architecture].weekly expected");
+    return `weekly median ${cat.weekly.at(-1).medianLevel}`;
+  });
+  await check("coach", "POST /v1/sessions accepts token fields; GET /v1/usage reports per merged change", async () => {
+    await api("POST", "/v1/sessions", { agent: "api-test", project: "billing-api", inputTokens: 1200, outputTokens: 300, costUsd: 0.01, retries: 0, navigatorUsed: true });
+    const u = (await coachApi("GET", "/v1/usage?project=billing-api")).json;
+    for (const k of ["sessions", "mergedChanges", "tokensPerMergedChange", "withNavigator", "withoutNavigator"]) assert(k in u, `usage.${k} missing`);
+    return `${u.sessions} sessions, ${u.tokensPerMergedChange ?? "–"} tokens/merged change`;
+  });
+}
+await check("coach", "GET /v1/katas lists credited canonical katas", async () => {
+  const { json } = await coachApi("GET", "/v1/katas?project=billing-api");
+  const list = Array.isArray(json) ? json : json.katas;
+  assert(Array.isArray(list) && list.length, "katas expected");
+  const canonical = list.filter((k) => k.url?.includes("sammancoaching.org"));
+  assert(canonical.every((k) => k.license && k.source), "sammancoaching.org katas must carry source and licence (CC-BY-SA)");
+  return `${list.length} katas, ${canonical.length} from sammancoaching.org`;
+});
+
 if (WRITES) {
   group("Feedback & evidence");
   await check("evidence", "false-positive feedback is counted in /v1/metrics", async () => {

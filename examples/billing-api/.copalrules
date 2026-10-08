@@ -1,7 +1,15 @@
 # Copal policy for the billing-api mock application.
-# Same file is used by Copal MCP, the pre-commit hook and the PR/MR check.
-version: 3
+# Same file is used by Copal MCP, the pre-commit hook, the IDE plugins and the PR/MR check.
+# v4: every rule carries coaching — a question first, the team's reference, and a kata for recurring mistakes.
+version: 4
 project: billing-api
+mode: coach          # hints lead with a question; fixes only on "Show me". Enforce rules still block.
+
+navigator:           # before an AI agent builds a feature: up to 3 questions, then test-first in small steps
+  enabled: true
+  minScope: feature
+  maxQuestions: 3
+  questions: [first-example, placement, risk]
 extends:
   - builtin:security
   - builtin:quality
@@ -18,6 +26,14 @@ rules:
     deny: "src/web/** -> src/persistence/**"
     why: "Keep persistence behind the API boundary: controllers call services, services call ports."
     sources: [ADR-007 layering]
+    coach:
+      question: "Which layer should know how invoices are stored — and what would the controller need to stop knowing?"
+      reference: docs/rules/ui-no-persistence.md
+      example:
+        bad: "import { InvoiceRepo } from '../persistence/invoice-repo'"
+        good: "constructor(private readonly invoices: InvoiceService) {}"
+      kata: https://sammancoaching.org/kata_descriptions/birthday_greetings.html
+      learningHour: ports-and-adapters
 
   - id: ledger-rounding
     category: architecture
@@ -31,6 +47,15 @@ rules:
     message: "Inline rounding bypasses LedgerPort"
     why: "Rounding in one place keeps invoices and the ledger reconciled."
     sources: [rule ledger-rounding, Jira FIN-402]
+    coach:
+      question: Who owns rounding in this codebase?
+      reference: docs/rules/ledger-rounding.md
+      example:
+        bad: "Math.round(total * 100) / 100"
+        good: "LedgerPort.round(total, Currency.EUR)"
+      kata: https://sammancoaching.org/kata_descriptions/supermarket_receipt.html
+      learningHour: naming-domain-concepts
+      escalateAfter: 2
 
   - id: approved-dependencies
     category: dependency
@@ -39,6 +64,9 @@ rules:
       allow: ["@billing/*", "zod", "pino", "fastify", "decimal.js", "typescript", "@types/*", "vitest", "tsx"]
       deny: [moment, left-pad, request]
     why: "New packages need a security and licence review (#platform-deps)."
+    coach:
+      question: "Could an approved package or a few lines of our own code do this — and who will maintain the new one?"
+      reference: docs/rules/approved-dependencies.md
 
   - id: invoice-contract-test
     category: testing
@@ -47,6 +75,11 @@ rules:
     requireTest:
       test: "src/invoice/{name}.test.ts"
     why: "Invoice maths is contract-tested against the ledger fixtures."
+    coach:
+      question: "Which example would prove this invoice change is right — and is it written down as a test yet?"
+      reference: docs/rules/invoice-contract-test.md
+      kata: https://sammancoaching.org/kata_descriptions/string_calculator.html
+      learningHour: test-first-small-steps
 
 environments:
   ci:

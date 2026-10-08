@@ -4,6 +4,12 @@
 
 Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout en bout, **sans aucune dépendance npm à l'exécution** (seul TypeScript sert au build).
 
+> **Copal = coach technique dans le workflow IA.** Chaque finding est une *hint card* qui commence par une question
+> (échelle : signal → question → référence → exemple → correctif sur demande « Show me »). Avant qu'un agent IA
+> construise une fonctionnalité, le **navigator** pose ≤ 3 questions (premier exemple → test qui échoue, emplacement,
+> risques) et en fait le brief : test d'abord, petits pas. Les erreurs récurrentes renvoient à un **kata**.
+> Stratégie complète : livre blanc *Copal — Coaching AI-Assisted Development* ; prompt Lovable : [`docs/lovable-pivot-prompt.md`](docs/lovable-pivot-prompt.md).
+
 ```
                      ┌──────────── .copalrules (versionné dans le repo) ────────────┐
                      │                                                              │
@@ -24,11 +30,11 @@ Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout e
 | `apps/mock-server` | **Backend Copal simulé** : API publique `/v1/*`, console web, faux GitHub et faux GitLab |
 | `packages/core` | Moteur de règles partagé : parser `.copalrules` v3, héritage, environnements, diff, redaction. Publié en module ES unique (Deno/Supabase, navigateur) : voir [`packages/core/README.md`](packages/core/README.md) |
 | `packages/client` | Client HTTP du backend, avec repli sur le moteur local si le serveur est injoignable |
-| `packages/cli` | **Plugin pré-commit** : `copal check`, `copal hook install`, `--fix` |
-| `packages/mcp-server` | **Plugin MCP** pour les agents (6 outils, 2 ressources, 1 prompt) |
+| `packages/cli` | **Plugin pré-commit** : `copal check` (sortie coach), `--show-me`, `copal reflect` (navigator), `copal hook install [--claude]` |
+| `packages/mcp-server` | **Plugin MCP** pour les agents (8 outils dont `copal_reflect` / `copal_brief`, 2 ressources, 2 prompts dont `copal-pair`) |
 | `packages/git-app` | **App GitHub / GitLab** : webhooks → revue inline, résumé, status check requis, feedback `/copal` |
-| `packages/vscode-extension` | **Extension VS Code** : diagnostics en direct + corrections rapides |
-| `plugins/jetbrains` | **Plugin JetBrains** (IntelliJ, WebStorm, PyCharm…) : annotations, quick fixes, menu Tools → Copal.dev |
+| `packages/vscode-extension` | **Extension VS Code** : hint cards au survol (Ask me · Explain · Show me), *Copal: Pair on a task* |
+| `plugins/jetbrains` | **Plugin JetBrains** (IntelliJ, WebStorm, PyCharm…) : intentions Ask me / Explain / Show me, fenêtre *Copal Pair* (navigator) |
 | `integrations/` | Configs MCP (Claude Code, Cursor, VS Code, Codex), CI GitHub Actions / GitLab, manifeste GitHub App |
 
 ## Démarrage
@@ -100,7 +106,32 @@ git commit -m "feat: invoice totals"            # bloqué
 node ~/copal-sandbox/packages/cli/dist/src/index.js check --fix   # applique la correction et re-stage
 ```
 
-## Format `.copalrules` (v3)
+## Format `.copalrules` (v4 — coaching)
+
+La v4 garde toutes les règles v3 (un fichier v3 se charge tel quel) et ajoute le coaching :
+
+```yaml
+version: 4
+mode: coach                # coach (défaut v4) | audit | enforce — les règles enforce/secrets bloquent toujours
+extends: [builtin:security, builtin:testing, builtin:hexagonal, builtin:clean-code]
+navigator: { enabled: true, minScope: feature, maxQuestions: 3, questions: [first-example, placement, risk] }
+rules:
+  - id: ledger-rounding
+    pattern: "Math\\.round\\(\\s*(\\w+)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
+    severity: audit        # alias v4 : block = enforce, audit = audit
+    coach:
+      question: Who owns rounding in this codebase?          # niveau 1 — jamais de code dans la question
+      reference: docs/rules/ledger-rounding.md                 # niveau 2 — le « pourquoi » de l'équipe
+      example: { bad: "Math.round(x * 100) / 100", good: "LedgerPort.round(x, Currency.EUR)" }   # niveau 3
+      kata: https://sammancoaching.org/kata_descriptions/supermarket_receipt.html   # lien + crédit (CC-BY-SA)
+      learningHour: naming-domain-concepts
+      escalateAfter: 2     # occurrences / sprint avant de proposer le kata
+    fix: { with: "LedgerPort.round($1, Currency.EUR)" }        # niveau 4 — « Show me » seulement
+```
+
+**Claude Code** : `copal hook install --claude` ajoute un hook `UserPromptSubmit` — pour une tâche de taille « feature », Claude pose d'abord les questions du navigator puis travaille test d'abord. Avec MCP, l'agent appelle `copal_reflect` puis `copal_brief`.
+
+### v3 (toujours supporté)
 
 Compatible avec l'exemple de vos docs (`id`, `mode`, `deny`, `why`), étendu ainsi :
 
@@ -157,7 +188,7 @@ node packages/git-app/dist/src/server.js simulate --provider github --dir <repo>
 ```
 Contre le vrai GitHub : créez l'app avec `integrations/github-app-manifest.json` (permissions *pull requests*, *statuses*, *issues* en écriture, *contents* en lecture ; événements `pull_request`, `issue_comment`), exposez `:4020` via un tunnel, puis `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY_PATH`, `GITHUB_WEBHOOK_SECRET` (ou un simple `GITHUB_TOKEN`). GitLab : webhook *Merge request* + *Comments* vers `/webhooks/gitlab`, `GITLAB_TOKEN` (scope `api`), `GITLAB_WEBHOOK_SECRET`. Rendez le contexte `copal/check` obligatoire dans la protection de branche. Sans app, `integrations/ci/` fournit l'équivalent en job CI.
 
-**JetBrains** — `cd plugins/jetbrains && ./gradlew buildPlugin` produit `build/distributions/copal-jetbrains-0.1.0.zip` (aussi publié comme artefact par la CI). Installez-le via *Settings → Plugins → ⚙ → Install Plugin from Disk*, ou testez-le dans un IDE bac à sable avec `./gradlew runIde`. Dans *Settings → Tools → Copal.dev*, renseignez le chemin de la CLI (`…/copal-sandbox/packages/cli/dist/src/index.js`), puis *Tools → Copal.dev → Set API Key…*. Le plugin envoie le contenu non sauvegardé à `copal check --stdin-file <fichier> --json` : même moteur, aucune analyse enregistrée à chaque frappe. *Check Staged Changes* lance la validation pré-commit, qui est enregistrée dans la console.
+**JetBrains** — `cd plugins/jetbrains && ./gradlew buildPlugin` produit `build/distributions/copal-jetbrains-0.2.0.zip` (aussi publié comme artefact par la CI). Installez-le via *Settings → Plugins → ⚙ → Install Plugin from Disk*, ou testez-le dans un IDE bac à sable avec `./gradlew runIde`. Dans *Settings → Tools → Copal.dev*, renseignez le chemin de la CLI (`…/copal-sandbox/packages/cli/dist/src/index.js`), puis *Tools → Copal.dev → Set API Key…*. Le plugin envoie le contenu non sauvegardé à `copal check --stdin-file <fichier> --json` : même moteur, aucune analyse enregistrée à chaque frappe. *Check Staged Changes* lance la validation pré-commit, qui est enregistrée dans la console.
 
 **VS Code** — ouvrez `packages/vscode-extension` dans VS Code et lancez *Run Copal extension (billing-api)* (F5). `npm run package` dans ce dossier produit un `.vsix` (télécharge `@vscode/vsce`).
 
@@ -172,6 +203,13 @@ En-tête `x-api-key: copal_dev_local` sur `/v1/*`. Les endpoints documentés de 
 | GET | `/v1/analyses[/:id]` | Historique |
 | POST | `/v1/analyses/:id/feedback` | `{ruleId, verdict: false-positive \| accepted}` |
 | GET | `/v1/metrics` | Drift, gates, governed changes, tokens |
+| POST | `/v1/coach/reflect` | `{project, task, files?}` → `{sessionId, engage, questions[≤3]}` (navigator) |
+| POST | `/v1/coach/reflect/:id/answers` | `{answers[], skipped?}` → `{brief}` (test d'abord, emplacement, cas limites, règles) |
+| POST | `/v1/coach/events` | Étape de l'échelle `{ruleId, levelReached 0-4, action, source}` → 204 |
+| GET | `/v1/growth` | Niveau médian nécessaire par catégorie et par semaine, récurrences, taux de réponse |
+| GET / POST | `/v1/katas` | Bibliothèque (katas canoniques crédités) + suggestions par récurrence |
+| POST | `/v1/katas/generate`, `/v1/katas/:id/complete` | Micro-kata depuis un finding ; complétion |
+| GET | `/v1/usage` | Tokens et coût par changement mergé, avec vs sans navigator |
 
 Options : `--port 4010`, `--project dir1,dir2` (projets préchargés), `--persist data/state.json`.
 

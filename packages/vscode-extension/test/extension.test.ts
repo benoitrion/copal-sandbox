@@ -39,8 +39,22 @@ class CodeAction {
   edit?: WorkspaceEdit;
   diagnostics?: Diagnostic[];
   isPreferred?: boolean;
+  command?: { command: string; arguments?: unknown[] };
   constructor(public title: string, public kind: unknown) {}
 }
+class MarkdownString {
+  isTrusted?: unknown;
+  constructor(public value = "") {}
+  appendMarkdown(v: string) {
+    this.value += v;
+    return this;
+  }
+}
+class Hover {
+  constructor(public contents: MarkdownString) {}
+}
+let hoverProvider: any;
+const commands: Record<string, (...a: any[]) => any> = {};
 const listeners: Record<string, ((x: any) => void)[]> = {};
 const ev = (name: string) => (fn: (x: any) => void) => ((listeners[name] ??= []).push(fn), { dispose() {} });
 const diags = new Map<string, Diagnostic[]>();
@@ -53,18 +67,22 @@ const fakeVscode = {
   Diagnostic,
   WorkspaceEdit,
   CodeAction,
+  MarkdownString,
+  Hover,
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
   CodeActionKind: { QuickFix: "quickfix" },
   StatusBarAlignment: { Left: 1, Right: 2 },
   languages: {
     createDiagnosticCollection: () => ({ set: (u: any, d: Diagnostic[]) => diags.set(u.toString(), d), delete: (u: any) => diags.delete(u.toString()), dispose() {} }),
     registerCodeActionsProvider: (_s: unknown, p: unknown) => ((provider = p), { dispose() {} }),
+    registerHoverProvider: (_s: unknown, p: unknown) => ((hoverProvider = p), { dispose() {} }),
   },
   workspace: {
     textDocuments: [] as unknown[],
     getConfiguration: () => ({ get: (k: string, d: unknown) => (k === "serverUrl" ? "" : k === "environment" ? "local" : d) }),
     findFiles: async () => [],
     openTextDocument: async () => undefined,
+    applyEdit: async () => true,
     onDidOpenTextDocument: ev("open"),
     onDidSaveTextDocument: ev("save"),
     onDidCloseTextDocument: ev("close"),
@@ -78,7 +96,8 @@ const fakeVscode = {
     showWarningMessage: async () => undefined,
     showInputBox: async () => undefined,
   },
-  commands: { registerCommand: () => ({ dispose() {} }) },
+  env: { clipboard: { writeText: async () => undefined } },
+  commands: { registerCommand: (name: string, fn: (...a: any[]) => any) => ((commands[name] = fn), { dispose() {} }) },
 };
 
 const origLoad = Module._load;
@@ -104,10 +123,11 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copal-vscode-"));
 fs.cpSync(APP, tmp, { recursive: true, filter: (s) => !s.includes(`${path.sep}scenarios`) });
 fs.cpSync(path.join(APP, "scenarios/01-invoice-rounding"), tmp, { recursive: true });
 
-test("extension reports findings and offers quick fixes", async () => {
+test("extension reports findings and offers quick fixes", async (t) => {
   const ext = require("../src/extension");
   const ctx = { subscriptions: [] as { dispose(): void }[], secrets: { get: async () => undefined, store: async () => undefined } };
   ext.activate(ctx);
+  t.after(() => ctx.subscriptions.forEach((s) => s.dispose()));
   const d = doc(path.join(tmp, "src/invoice/total.ts"));
   listeners.open.forEach((fn) => fn(d));
 
@@ -119,13 +139,44 @@ test("extension reports findings and offers quick fixes", async () => {
   assert.match(statusBar.text, /Copal 2/);
 
   const actions = provider.provideCodeActions(d, rounding.range, { diagnostics: [rounding] });
-  assert.equal(actions.length, 2);
-  assert.equal(actions[0].edit.ops[0].text, "  const total = LedgerPort.round(sum, Currency.EUR);");
-  assert.equal(actions[1].edit.ops[0].text, "  // copal-ignore ledger-rounding\n");
+  // billing-api rules are coached (v4): Ask me · Explain · Show me (the correction) · false positive
+  assert.deepEqual(actions.map((a: CodeAction) => a.title.replace(/ \(.*$/, "")), ["Copal: Ask me", "Copal: Explain", "Copal: Show me", "Copal: mark as false positive"]);
+  const showMe = actions.find((a: CodeAction) => a.title.startsWith("Copal: Show me"));
+  assert.equal(showMe.edit.ops[0].text, "  const total = LedgerPort.round(sum, Currency.EUR);");
+  assert.equal(showMe.isPreferred, false, "the fix is never the preferred one-click action for coached rules");
+  assert.equal(actions.at(-1).edit.ops[0].text, "  // copal-ignore ledger-rounding\n");
 
   // clean file → no diagnostics
   const clean = doc(path.join(tmp, "src/service/invoice-service.ts"));
   listeners.open.forEach((fn) => fn(clean));
   assert.deepEqual(diags.get(clean.uri.toString()), []);
+  ctx.subscriptions.forEach((s) => s.dispose());
+});
+
+test("coached findings lead with the question; the fix is behind Show me", async (t) => {
+  // Same app with a v4 coaching block on ledger-rounding.
+  const rules = fs.readFileSync(path.join(tmp, ".copalrules"), "utf8");
+  if (!/coach:/.test(rules)) {
+    fs.writeFileSync(
+      path.join(tmp, ".copalrules"),
+      rules.replace(/version: 3/, "version: 4").replace(/(\n  - id: ledger-rounding\n)/, "$1    coach:\n      question: Who owns rounding in this codebase?\n"),
+    );
+  }
+  const ext = require("../src/extension");
+  const ctx = { subscriptions: [] as { dispose(): void }[], secrets: { get: async () => undefined, store: async () => undefined } };
+  ext.activate(ctx);
+  t.after(() => ctx.subscriptions.forEach((s) => s.dispose()));
+  const d = doc(path.join(tmp, "src/invoice/total.ts"));
+  listeners.open.forEach((fn) => fn(d));
+  const found = diags.get(d.uri.toString())!;
+  const rounding = found.find((x) => x.code === "ledger-rounding")!;
+  assert.match(rounding.message, /Who owns rounding/);
+  const titles = provider.provideCodeActions(d, rounding.range, { diagnostics: [rounding] }).map((a: CodeAction) => a.title);
+  assert.deepEqual(titles.slice(0, 3), ["Copal: Ask me (ledger-rounding)", "Copal: Explain (ledger-rounding)", "Copal: Show me (ledger-rounding)"]);
+  const hover = hoverProvider.provideHover(d, new Position(7, 4));
+  assert.match(hover.contents.value, /\*\*Who owns rounding in this codebase\?\*\*/);
+  assert.match(hover.contents.value, /command:copal\.ask/);
+  assert.match(hover.contents.value, /command:copal\.showMe/);
+  assert.ok(commands["copal.pair"], "navigator command registered");
   ctx.subscriptions.forEach((s) => s.dispose());
 });

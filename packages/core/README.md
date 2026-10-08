@@ -9,8 +9,8 @@ Released versions are tagged `core-vX.Y.Z` ([releases](https://github.com/benoit
 **Deno / Supabase Edge Functions** — import the single-file ES module by URL (immutable per tag):
 
 ```ts
-// @ts-types="https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.1.0/packages/core/esm/copal-core.d.ts"
-import { evaluate, parsePolicy, resolvePolicy, validatePolicy, redact } from "https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.1.0/packages/core/esm/copal-core.mjs";
+// @ts-types="https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.2.0/packages/core/esm/copal-core.d.ts"
+import { evaluate, parsePolicy, resolvePolicy, validatePolicy, redact, navigatorQuestions, buildBrief, hintCard, kataSuggestions } from "https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.2.0/packages/core/esm/copal-core.mjs";
 
 const policy = resolvePolicy(parsePolicy(policyText));      // builtin:* packs only — no file access
 const report = evaluate(files, policy, { environment: "ci" });
@@ -19,7 +19,7 @@ const report = evaluate(files, policy, { environment: "ci" });
 **npm (Node, Vite, any bundler)** — install the release tarball by URL, no registry account needed:
 
 ```bash
-npm i https://github.com/benoitrion/copal-sandbox/releases/download/core-v0.1.0/copal-core-0.1.0.tgz
+npm i https://github.com/benoitrion/copal-sandbox/releases/download/core-v0.2.0/copal-core-0.2.0.tgz
 ```
 
 ```ts
@@ -45,3 +45,12 @@ import { loadPolicy } from "@copal/core";           // Node: adds filesystem hel
 Before the first release, or between releases, pin jsDelivr to a commit instead of a tag: `https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@<commit-sha>/packages/core/esm/copal-core.mjs`.
 
 The bundle is checked by `test/esm.test.ts` (identical results to the source build on every billing-api scenario).
+
+## Coaching (0.2.0, `.copalrules` v4)
+
+- `parsePolicy` / `validatePolicy` accept `version: 4`, policy `mode` (coach | audit | enforce), `navigator`, per-rule `coach` (question, reference, example, kata, learningHour, escalateAfter) and `severity: block | audit`. v3 files are unchanged.
+- Findings carry `coach` and `fixText`; `hintCard(finding)` gives the hint-ladder view (signal, question, why/reference/example, fix behind "Show me", kata).
+- `navigatorQuestions(policy, task)` → up to 3 code-free questions for feature-sized tasks (skips small ones); `buildBrief(policy, task, questions, answers)` → the agent brief (first failing test, location, edge cases, rules, small steps).
+- `kataSuggestions(policy, occurrences)` → katas per developer when a rule recurs, learning-hour topics when it recurs across a team.
+- `containsCode(text)` guards questions against leaking the answer.
+- Built-in packs: `builtin:security`, `builtin:quality`, `builtin:testing`, `builtin:hexagonal`, `builtin:clean-code`, all with coaching.

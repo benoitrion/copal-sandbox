@@ -65,11 +65,29 @@ declare module "vscode" {
     replace(uri: Uri, range: Range, newText: string): void;
     insert(uri: Uri, position: Position, newText: string): void;
   }
+  export interface Command {
+    title: string;
+    command: string;
+    arguments?: any[];
+  }
   export class CodeAction {
     constructor(title: string, kind?: CodeActionKind);
     edit?: WorkspaceEdit;
+    command?: Command;
     diagnostics?: Diagnostic[];
     isPreferred?: boolean;
+  }
+  export class MarkdownString {
+    constructor(value?: string, supportThemeIcons?: boolean);
+    value: string;
+    isTrusted?: boolean | { enabledCommands: readonly string[] };
+    appendMarkdown(value: string): MarkdownString;
+  }
+  export class Hover {
+    constructor(contents: MarkdownString | MarkdownString[], range?: Range);
+  }
+  export interface HoverProvider {
+    provideHover(document: TextDocument, position: Position, token?: unknown): Hover | undefined;
   }
   export interface CodeActionContext {
     readonly diagnostics: readonly Diagnostic[];
@@ -109,19 +127,23 @@ declare module "vscode" {
     readonly secrets: SecretStorage;
   }
   export interface InputBoxOptions {
+    title?: string;
+    ignoreFocusOut?: boolean;
     prompt?: string;
     password?: boolean;
     placeHolder?: string;
   }
   export namespace languages {
     function createDiagnosticCollection(name?: string): DiagnosticCollection;
+    function registerHoverProvider(selector: { scheme?: string; language?: string }, provider: HoverProvider): Disposable;
     function registerCodeActionsProvider(selector: { scheme?: string; language?: string }, provider: CodeActionProvider, metadata?: { providedCodeActionKinds?: readonly CodeActionKind[] }): Disposable;
   }
   export namespace workspace {
     const textDocuments: readonly TextDocument[];
     function getConfiguration(section?: string): WorkspaceConfiguration;
     function findFiles(include: string, exclude?: string, maxResults?: number): Thenable<Uri[]>;
-    function openTextDocument(uri: Uri): Thenable<TextDocument>;
+    function openTextDocument(uri: Uri | string): Thenable<TextDocument>;
+    function applyEdit(edit: WorkspaceEdit): Thenable<boolean>;
     const onDidOpenTextDocument: Event<TextDocument>;
     const onDidSaveTextDocument: Event<TextDocument>;
     const onDidCloseTextDocument: Event<TextDocument>;
@@ -131,9 +153,13 @@ declare module "vscode" {
     const activeTextEditor: TextEditor | undefined;
     function createOutputChannel(name: string): OutputChannel;
     function createStatusBarItem(alignment?: StatusBarAlignment, priority?: number): StatusBarItem;
-    function showInformationMessage(message: string): Thenable<string | undefined>;
+    function showInformationMessage(message: string, ...items: string[]): Thenable<string | undefined>;
+    function showTextDocument(document: TextDocument): Thenable<TextEditor>;
     function showWarningMessage(message: string): Thenable<string | undefined>;
     function showInputBox(options?: InputBoxOptions): Thenable<string | undefined>;
+  }
+  export namespace env {
+    const clipboard: { writeText(value: string): Thenable<void> };
   }
   export namespace commands {
     function registerCommand(command: string, callback: (...args: any[]) => any): Disposable;

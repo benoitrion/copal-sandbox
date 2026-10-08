@@ -1,8 +1,8 @@
 {
   "name": "copal-vscode",
   "displayName": "Copal.dev",
-  "description": "Affiche les findings Copal (.copalrules) dans l'éditeur, avec corrections rapides.",
-  "version": "0.1.0",
+  "description": "Copal technical coach in the editor: hint cards (question, explain, show me), navigator before AI builds, katas.",
+  "version": "0.2.0",
   "publisher": "copal",
   "license": "UNLICENSED",
   "engines": {
@@ -34,6 +34,22 @@
       {
         "command": "copal.showRules",
         "title": "Copal: Afficher les règles applicables"
+      },
+      {
+        "command": "copal.pair",
+        "title": "Copal: Pair on a task (navigator)"
+      },
+      {
+        "command": "copal.ask",
+        "title": "Copal: Ask me about this finding"
+      },
+      {
+        "command": "copal.explain",
+        "title": "Copal: Explain this finding"
+      },
+      {
+        "command": "copal.showMe",
+        "title": "Copal: Show me the fix"
       }
     ],
     "configuration": {
@@ -60,6 +76,6 @@
     "package": "bash scripts-package.sh"
   },
   "dependencies": {
-    "@copal/core": "0.1.0"
+    "@copal/core": "0.2.0"
   }
 }

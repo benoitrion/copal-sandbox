@@ -1,7 +1,23 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { evaluate, FileChange, loadPolicy, nodePolicyLoader, parsePolicy, Policy, redact, Report, resolvePolicy } from "@copal/core";
+import {
+  AgentBrief,
+  buildBrief,
+  evaluate,
+  FileChange,
+  HintLevel,
+  loadPolicy,
+  NavigatorAnswer,
+  NavigatorQuestion,
+  navigatorQuestions,
+  nodePolicyLoader,
+  parsePolicy,
+  Policy,
+  redact,
+  Report,
+  resolvePolicy,
+} from "@copal/core";
 
 export type Source = "precommit" | "pr" | "mcp" | "ide" | "branch";
 
@@ -30,6 +46,50 @@ export interface AnalyzeResult extends Report {
   mode: "remote" | "local";
   project?: string;
 }
+
+/** One step on the hint ladder, recorded for the growth metric (POST /v1/coach/events). */
+export interface CoachEvent {
+  project?: string;
+  developer?: string;
+  ruleId: string;
+  category?: string;
+  levelReached: HintLevel;
+  action: "shown" | "ask" | "explain" | "show_me" | "skipped" | "answered";
+  source: "ide" | "cli" | "agent" | "pr";
+  at?: string;
+}
+
+export interface ReflectResult {
+  sessionId: string;
+  engage: boolean;
+  reason?: string;
+  questions: NavigatorQuestion[];
+  mode: "remote" | "local";
+}
+
+/**
+ * Servers that predate v4 (or another implementation) may return findings without coaching data:
+ * fill it in from the repository's own policy so every surface can render hint cards.
+ */
+export function enrichWithPolicy<R extends Report>(r: R, policy?: Policy): R {
+  if (!policy) return r;
+  const byId = new Map(policy.rules.map((x) => [x.id, x]));
+  return {
+    ...r,
+    policyMode: r.policyMode ?? policy.mode ?? (policy.version >= 4 ? "coach" : "audit"),
+    findings: r.findings.map((f) => {
+      const rule = byId.get(f.ruleId);
+      if (!rule) return f;
+      return {
+        ...f,
+        coach: f.coach ?? rule.coach,
+        fixText: f.fixText ?? (typeof rule.fix === "string" ? rule.fix : undefined),
+      };
+    }),
+  };
+}
+
+const localSessions = new Map<string, { task: string; questions: NavigatorQuestion[] }>();
 
 export const CONFIG_FILE = path.join(os.homedir(), ".copal", "config.json");
 
@@ -100,7 +160,19 @@ export class CopalClient {
   getPolicy(project: string) {
     return this.request<{ project: string; yaml: string; policy: Policy }>("GET", `/v1/projects/${encodeURIComponent(project)}/policy`);
   }
-  recordSession(s: { agent: string; project?: string; durationMs?: number; tokens?: number; findings?: number }) {
+  recordSession(s: {
+    agent: string;
+    project?: string;
+    durationMs?: number;
+    tokens?: number;
+    findings?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    costUsd?: number;
+    model?: string;
+    retries?: number;
+    navigatorUsed?: boolean;
+  }) {
     return this.request("POST", "/v1/sessions", s);
   }
   heartbeats(beats: { file: string; ts: number; editor: string }[]) {
@@ -117,6 +189,51 @@ export class CopalClient {
     return this.request("POST", `/v1/analyses/${analysisId}/feedback`, { ruleId, verdict, note });
   }
 
+  /** Navigator mode: questions to ask before an agent builds `task`. Server first, local engine as fallback. */
+  async reflect(req: { project?: string; task: string; files?: string[]; developer?: string }, localPolicy?: Policy): Promise<ReflectResult> {
+    if (this.remote) {
+      try {
+        const r = await this.request<Omit<ReflectResult, "mode">>("POST", "/v1/coach/reflect", req);
+        return { ...r, engage: r.engage ?? r.questions.length > 0, mode: "remote" };
+      } catch (e) {
+        if (!(e instanceof CopalApiError) || (e.status && e.status !== 404 && e.status < 500)) throw e;
+      }
+    }
+    const s = navigatorQuestions(localPolicy, req.task, { files: req.files });
+    const sessionId = `local_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    localSessions.set(sessionId, { task: req.task, questions: s.questions });
+    return { sessionId, engage: s.engage, reason: s.reason, questions: s.questions, mode: "local" };
+  }
+
+  /** Send the developer's answers; returns the brief the agent works from. */
+  async answer(sessionId: string, answers: NavigatorAnswer[], skipped = false, localPolicy?: Policy, fallback?: { task: string; questions: NavigatorQuestion[] }): Promise<AgentBrief> {
+    if (this.remote && !sessionId.startsWith("local_")) {
+      const r = await this.request<{ brief: AgentBrief }>("POST", `/v1/coach/reflect/${encodeURIComponent(sessionId)}/answers`, { answers, skipped });
+      return r.brief;
+    }
+    const s = localSessions.get(sessionId) ?? fallback;
+    if (!s) throw new CopalApiError(`unknown navigator session ${sessionId}`);
+    return buildBrief(localPolicy, s.task, s.questions, answers, skipped);
+  }
+
+  /** Best effort: growth events never break the developer's flow. */
+  async coachEvents(events: CoachEvent[]): Promise<boolean> {
+    if (!this.remote || !events.length) return false;
+    try {
+      for (const e of events) await this.request("POST", "/v1/coach/events", { at: new Date().toISOString(), ...e });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  growth(project: string, developer?: string) {
+    return this.request<unknown>("GET", `/v1/growth?project=${encodeURIComponent(project)}${developer ? `&developer=${encodeURIComponent(developer)}` : ""}`);
+  }
+  katas() {
+    return this.request<unknown[]>("GET", "/v1/katas");
+  }
+
   /**
    * Analyze changes. Uses the Copal server when configured (so the console records evidence);
    * falls back to the local engine with the repository's `.copalrules` otherwise.
@@ -125,7 +242,7 @@ export class CopalClient {
     if (this.remote) {
       try {
         const r = await this.request<AnalyzeResult>("POST", "/v1/analyze", req);
-        return { ...r, mode: "remote" };
+        return enrichWithPolicy({ ...r, mode: "remote" as const }, localPolicy);
       } catch (e) {
         if (!this.cfg.offlineFallback || (e instanceof CopalApiError && e.status && e.status < 500)) throw e;
         process.stderr.write(`copal: ${(e as Error).message} — falling back to local engine\n`);

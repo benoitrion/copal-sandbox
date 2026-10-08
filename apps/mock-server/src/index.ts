@@ -11,9 +11,14 @@
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import {
   applicableRules,
+  buildBrief,
+  containsCode,
   evaluate,
+  kataSuggestions,
+  navigatorQuestions,
   FileChange,
   parsePolicy,
   redact,
@@ -142,6 +147,8 @@ router.post("/v1/mentor", ({ body }) => {
 });
 
 router.post("/v1/sessions", ({ body }) => {
+  for (const k of ["tokens", "inputTokens", "outputTokens", "costUsd", "retries"])
+    if (body?.[k] !== undefined && (typeof body[k] !== "number" || body[k] < 0)) throw new HttpError(400, `${k} must be a non-negative number`);
   store.state.sessions.push({ at: new Date().toISOString(), agent: body?.agent ?? "unknown", ...body });
   store.save();
   return { ok: true };
@@ -200,6 +207,116 @@ router.post("/v1/analyses/:id/feedback", ({ params, body }) => {
 
 router.get("/v1/metrics", ({ query }) => store.metrics(query.get("project") ?? undefined));
 
+// ------------------------------------------------------------------ coaching (v4)
+const projectPolicy = (name?: string) => (name ? store.state.projects[name]?.policy : Object.values(store.state.projects)[0]?.policy);
+
+router.post("/v1/coach/reflect", ({ body }) => {
+  if (typeof body?.task !== "string" || !body.task.trim()) throw new HttpError(400, "task required");
+  const policy = projectPolicy(body.project);
+  const s = navigatorQuestions(policy, redact(body.task, policy).text, { files: Array.isArray(body.files) ? body.files : undefined, force: !!body.force });
+  // Questions must never carry the answer.
+  const questions = s.questions.filter((q) => !containsCode(q.text));
+  const id = "nav_" + crypto.randomBytes(5).toString("hex");
+  store.state.navSessions[id] = { id, project: body.project, developer: body.developer, task: body.task, questions, createdAt: new Date().toISOString() };
+  store.save();
+  return { sessionId: id, engage: s.engage && questions.length > 0, reason: s.reason, questions };
+});
+
+router.post("/v1/coach/reflect/:id/answers", ({ params, body }) => {
+  const s = store.state.navSessions[params.id];
+  if (!s) throw new HttpError(404, "unknown navigator session");
+  if (body?.answers !== undefined && !Array.isArray(body.answers)) throw new HttpError(400, "answers[] must be an array");
+  const answers = (body?.answers ?? []).filter((a: { id?: string; text?: string }) => typeof a?.id === "string" && typeof a?.text === "string");
+  const brief = buildBrief(projectPolicy(s.project), s.task, s.questions, answers, !!body?.skipped || answers.length === 0);
+  s.answeredAt = new Date().toISOString();
+  s.skipped = brief.skipped;
+  store.save();
+  return { brief };
+});
+
+const ACTIONS = ["shown", "ask", "explain", "show_me", "skipped", "answered"];
+router.post("/v1/coach/events", ({ body, res }) => {
+  const list = Array.isArray(body?.events) ? body.events : [body];
+  for (const e of list) {
+    if (!e?.ruleId || typeof e.levelReached !== "number" || e.levelReached < 0 || e.levelReached > 4 || !ACTIONS.includes(e.action))
+      throw new HttpError(422, `invalid event: need ruleId, levelReached 0-4 and action in ${ACTIONS.join("|")}`);
+    store.state.coachEvents.push({ ...e, source: e.source ?? "ide", at: e.at ?? new Date().toISOString() });
+  }
+  store.state.coachEvents = store.state.coachEvents.slice(-20000);
+  store.save();
+  res.writeHead(204, { "access-control-allow-origin": "*" }).end();
+  return undefined;
+});
+
+router.get("/v1/growth", ({ query }) => store.growth(query.get("project") ?? undefined, query.get("developer") ?? undefined, query.get("since") ?? undefined));
+
+router.get("/v1/katas", ({ query }) => {
+  const project = query.get("project") ?? undefined;
+  const policy = projectPolicy(project);
+  const occ = store.state.coachEvents
+    .filter((e) => e.action === "shown" && (!project || e.project === project))
+    .map((e) => ({ ruleId: e.ruleId, developer: e.developer, at: e.at }));
+  return { katas: store.state.katas, suggestions: policy ? kataSuggestions(policy, occ) : [] };
+});
+
+router.post("/v1/katas", ({ body }) => {
+  if (!body?.title || !body?.url) throw new HttpError(400, "title and url required");
+  const k = {
+    id: "k_" + crypto.randomBytes(4).toString("hex"),
+    kind: "canonical" as const,
+    title: String(body.title),
+    url: String(body.url),
+    source: body.source,
+    license: body.license,
+    rules: Array.isArray(body.rules) ? body.rules : [],
+    minutes: body.minutes,
+    level: body.level,
+    learningHour: body.learningHour,
+    completions: [],
+  };
+  store.state.katas.push(k);
+  store.save();
+  return k;
+});
+
+/** Micro-kata from a finding: the snippet that broke the rule, one failing test, ten minutes. Never merged. */
+router.post("/v1/katas/generate", ({ body }) => {
+  const a = store.state.analyses.find((x) => x.findings.some((f, i) => `${x.id}:${i}` === body?.findingId || (x.id === body?.analysisId && f.ruleId === body?.ruleId)));
+  const idx = a ? a.findings.findIndex((f, i) => `${a.id}:${i}` === body?.findingId || f.ruleId === body?.ruleId) : -1;
+  const f = a && idx >= 0 ? a.findings[idx] : undefined;
+  if (!f) throw new HttpError(404, "unknown finding (use findingId '<analysisId>:<index>' or analysisId + ruleId)");
+  const q = f.coach?.question ?? `How would you remove the ${f.ruleId} finding while keeping the behaviour?`;
+  const k = {
+    id: "mk_" + crypto.randomBytes(4).toString("hex"),
+    kind: "micro" as const,
+    title: `Micro-kata: ${f.ruleId} in ${f.file}`,
+    project: a!.project,
+    rules: [f.ruleId],
+    minutes: 10,
+    level: "practice",
+    learningHour: f.coach?.learningHour,
+    snippet: `// ${f.file}:${f.line}\n// ${f.message}`,
+    failingTest: `test("${f.ruleId}: the behaviour stays the same and the rule no longer fires", () => {\n  // 1. pin the current behaviour (approval / characterisation test)\n  // 2. refactor until \`copal check\` is clean\n  throw new Error("write me first");\n});`,
+    instructions: `${q}\n\nWork in a scratch branch. First pin the behaviour with a test, then change the design in small steps, running the test after each. Compare with the team reference when done. This is practice — it is not merged.`,
+    url: f.coach?.kata,
+    completions: [],
+  };
+  store.state.katas.push(k);
+  store.save();
+  return k;
+});
+
+router.post("/v1/katas/:id/complete", ({ params, body, res }) => {
+  const k = store.state.katas.find((x) => x.id === params.id);
+  if (!k) throw new HttpError(404, "unknown kata");
+  k.completions.push({ at: new Date().toISOString(), developer: body?.developer });
+  store.save();
+  res.writeHead(204, { "access-control-allow-origin": "*" }).end();
+  return undefined;
+});
+
+router.get("/v1/usage", ({ query }) => store.usage(query.get("project") ?? undefined, query.get("since") ?? undefined));
+
 // ------------------------------------------------------------------ console
 router.get("/console/api/state", () => ({
   status: { workspace: store.state.workspace, projects: Object.keys(store.state.projects) },
@@ -208,11 +325,16 @@ router.get("/console/api/state", () => ({
   projects: Object.values(store.state.projects).map((p) => ({ name: p.name, version: p.version, yaml: p.yaml, rules: p.policy.rules })),
   pulls: store.state.pulls,
   sessions: store.state.sessions.slice(-50),
+  growth: store.growth(),
+  usage: store.usage(),
+  katas: store.state.katas,
 }));
 router.post("/console/api/reset", () => {
   store.state.analyses = [];
   store.state.pulls = [];
   store.state.sessions = [];
+  store.state.coachEvents = [];
+  store.state.navSessions = {};
   store.save();
   return { ok: true };
 });

@@ -4,18 +4,22 @@
     <vendor url="https://copal.lovable.app">Copal.dev</vendor>
 
     <description><![CDATA[
-    <p>Executable engineering policy in the editor. Copal reads the project-owned <code>.copalrules</code>
-    (architecture boundaries, approved dependencies, security and quality rules) and highlights deviations while you type,
-    with the same engine used by the pre-commit hook, the pull-request check and Copal MCP.</p>
+    <p>Copal is your team's technical coach in the editor. It reads the project-owned <code>.copalrules</code>
+    and, while you type, shows each finding as a hint card that leads with a question — the way a good pair partner would.
+    Same engine as the pre-commit hook, the pull-request check and Copal MCP.</p>
     <ul>
-      <li>Errors for <b>enforce</b> rules, warnings for <b>audit</b> rules, with the reason and its sources</li>
-      <li>Quick fixes: apply the rule's concrete correction, or mark a finding as a false positive</li>
-      <li>Tools → Copal.dev: check staged changes, show the rules for the current file, set the API key</li>
+      <li><b>Hint ladder</b> (Alt+Enter): <i>Ask me</i> (the rule's question) · <i>Explain</i> (why, team reference,
+      wrong vs right) · <i>Show me</i> (the fix, only on request). Each step feeds your growth view.</li>
+      <li><b>Pair on a Task</b>: before asking an AI assistant to build a feature, answer up to three navigator questions
+      (first example, placement, risk); Copal writes the brief: test first, small steps.</li>
+      <li><b>Practice</b>: rules that keep recurring link to a kata.</li>
+      <li>Security rules stay blocking; mark a false positive with <code>copal-ignore</code>.</li>
     </ul>
     <p>Requires Node.js 20+ and the <code>copal</code> CLI.</p>
     ]]></description>
 
-    <change-notes><![CDATA[<p>0.1.0 — first sandbox release.</p>]]></change-notes>
+    <change-notes><![CDATA[<p>0.2.0 — coaching: hint ladder (Ask me · Explain · Show me), Copal Pair navigator tool window, kata links.</p>
+    <p>0.1.0 — first sandbox release.</p>]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
 
@@ -33,11 +37,16 @@
         <applicationConfigurable parentId="tools" instance="dev.copal.jetbrains.CopalConfigurable"
                                  id="dev.copal.settings" displayName="Copal.dev"/>
         <notificationGroup id="Copal.dev" displayType="BALLOON"/>
+        <toolWindow id="Copal Pair" anchor="right" factoryClass="dev.copal.jetbrains.CopalPairToolWindowFactory"
+                    icon="AllIcons.Toolwindows.ToolWindowMessages" canCloseContents="false"/>
     </extensions>
 
     <actions>
         <group id="Copal.ToolsMenu" text="Copal.dev" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="Copal.PairOnTask" class="dev.copal.jetbrains.PairOnTaskAction"
+                    text="Pair on a Task…" description="Navigator: answer up to 3 questions before an AI assistant builds a feature"/>
+            <separator/>
             <action id="Copal.CheckStaged" class="dev.copal.jetbrains.CheckStagedAction"
                     text="Check Staged Changes" description="Run the Copal pre-commit validation on staged changes"/>
             <action id="Copal.ShowRules" class="dev.copal.jetbrains.ShowRulesAction"

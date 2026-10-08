@@ -1,10 +1,26 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { applicableRules, evaluate, fileAsChange, Finding, loadPolicy, Policy, rulesToGuidance } from "@copal/core";
+import * as fs from "node:fs";
+import {
+  applicableRules,
+  briefToText,
+  buildBrief,
+  evaluate,
+  fileAsChange,
+  Finding,
+  HintLevel,
+  hintCard,
+  loadPolicy,
+  navigatorQuestions,
+  Policy,
+  rulesToGuidance,
+} from "@copal/core";
 
 /**
- * Copal for VS Code: evaluates the open file against the nearest `.copalrules` (same engine as
- * pre-commit and PR checks), shows findings as diagnostics, and offers the suggested corrections as quick fixes.
+ * Copal for VS Code — the technical coach in the editor. Evaluates the open file against the nearest `.copalrules`
+ * (same engine as pre-commit and PR checks) and shows each finding as a hint card: the question first, then
+ * Ask me · Explain · Show me. The fix is level 4 of the hint ladder: only on request, and recorded.
+ * "Copal: Pair on a task" runs the navigator before an AI assistant builds a feature.
  */
 
 const SOURCE = "copal";
@@ -36,7 +52,7 @@ function toDiagnostic(doc: vscode.TextDocument, f: Finding): vscode.Diagnostic {
   const end = f.endColumn ? f.endColumn - 1 : text.length;
   const d = new vscode.Diagnostic(
     new vscode.Range(line, start, line, Math.max(end, start + 1)),
-    `${f.message}${f.why ? ` — ${f.why}` : ""}`,
+    f.coach?.question ? `${f.message} — ${f.coach.question}` : `${f.message}${f.why ? ` — ${f.why}` : ""}`,
     f.blocking ? vscode.DiagnosticSeverity.Error : f.severity === "info" ? vscode.DiagnosticSeverity.Information : vscode.DiagnosticSeverity.Warning,
   );
   d.source = SOURCE;
@@ -54,12 +70,150 @@ function check(doc: vscode.TextDocument) {
   if (rel.startsWith("..")) return;
   const report = evaluate([fileAsChange(rel, doc.getText())], p.policy, { environment: cfg().environment });
   findingsByUri.set(doc.uri.toString(), report.findings);
+  rootOf.set(doc.uri.toString(), p.root);
+  projectOf.set(doc.uri.toString(), p.policy.project);
   diagnostics.set(doc.uri, report.findings.map((f) => toDiagnostic(doc, f)));
-  status.text = report.blocking ? `$(error) Copal ${report.summary.blocking}` : report.findings.length ? `$(warning) Copal ${report.findings.length}` : "$(check) Copal";
+  status.text = report.blocking
+    ? `$(error) Copal ${report.summary.blocking}`
+    : report.findings.length
+      ? `${report.policyMode === "coach" ? "$(comment-discussion)" : "$(warning)"} Copal ${report.findings.length}`
+      : "$(check) Copal";
   status.tooltip = `${report.summary.blocking} blocking · ${report.summary.audit} audit (${report.environment})`;
   status.show();
   heartbeats.push({ file: rel, ts: Date.now(), editor: "vscode" });
 }
+
+// ---------------------------------------------------------------- coaching
+interface FindingRef {
+  uri: string;
+  ruleId: string;
+  line: number;
+}
+let extCtx: vscode.ExtensionContext | undefined;
+const projectOf = new Map<string, string | undefined>();
+
+function findingFor(ref: FindingRef): Finding | undefined {
+  return findingsByUri.get(ref.uri)?.find((f) => f.ruleId === ref.ruleId && f.line === ref.line);
+}
+
+/** Growth metric: the ladder level a finding reached (best effort, never blocks the developer). */
+async function coachEvent(f: Finding, levelReached: HintLevel, action: string, uri?: string) {
+  const { serverUrl } = cfg();
+  if (!serverUrl || !extCtx) return;
+  const key = await extCtx.secrets.get("copal.apiKey");
+  try {
+    await fetch(serverUrl.replace(/\/$/, "") + "/v1/coach/events", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(key ? { "x-api-key": key } : {}) },
+      body: JSON.stringify({ project: uri ? projectOf.get(uri) : undefined, ruleId: f.ruleId, category: f.category, levelReached, action, source: "ide", at: new Date().toISOString() }),
+    });
+  } catch {
+    /* offline */
+  }
+}
+
+const cmdLink = (label: string, command: string, ref: FindingRef) => `[${label}](command:${command}?${encodeURIComponent(JSON.stringify([ref]))})`;
+
+/** The hint card shown on hover: signal + question, then the ladder as links. */
+export function hintCardMarkdown(f: Finding, uri: string): string {
+  const c = hintCard(f);
+  const ref: FindingRef = { uri, ruleId: f.ruleId, line: f.line };
+  const out = [`**${f.blocking ? "$(error)" : "$(comment-discussion)"} ${c.title}**`, "", c.signal];
+  if (c.question) out.push("", `**${c.question}**`);
+  const links = [c.question ? cmdLink("Ask me", "copal.ask", ref) : "", cmdLink("Explain", "copal.explain", ref), c.fix ? cmdLink("Show me", "copal.showMe", ref) : ""].filter(Boolean);
+  out.push("", links.join(" · "));
+  if (c.kata) out.push("", `Practice: [kata](${c.kata})${c.learningHour ? ` · learning hour *${c.learningHour}*` : ""}`);
+  return out.join("\n");
+}
+
+class Hovers implements vscode.HoverProvider {
+  provideHover(doc: vscode.TextDocument, pos: vscode.Position): vscode.Hover | undefined {
+    const f = (findingsByUri.get(doc.uri.toString()) ?? []).find((x) => x.line - 1 === pos.line);
+    if (!f) return undefined;
+    const md = new vscode.MarkdownString(hintCardMarkdown(f, doc.uri.toString()), true);
+    md.isTrusted = { enabledCommands: ["copal.ask", "copal.explain", "copal.showMe"] };
+    void coachEvent(f, f.coach?.question ? 1 : 0, "shown", doc.uri.toString());
+    return new vscode.Hover(md);
+  }
+}
+
+async function ask(ref: FindingRef) {
+  const f = findingFor(ref);
+  if (!f) return;
+  const q = f.coach?.question ?? `What would you change about ${f.ruleId} here, and why?`;
+  const answer = await vscode.window.showInputBox({ title: `Copal · ${f.ruleId}`, prompt: q, placeHolder: "Think aloud — your answer stays local", ignoreFocusOut: true });
+  if (answer === undefined) return;
+  void coachEvent(f, 1, answer.trim() ? "answered" : "skipped", ref.uri);
+  const next = await vscode.window.showInformationMessage(
+    answer.trim() ? "Nice — want to compare with the team's reasoning?" : "No worries. Want a nudge?",
+    "Explain",
+    ...(hintCard(f).fix ? ["Show me"] : []),
+  );
+  if (next === "Explain") await explain(ref);
+  if (next === "Show me") await showMe(ref);
+}
+
+async function explain(ref: FindingRef) {
+  const f = findingFor(ref);
+  if (!f) return;
+  const c = hintCard(f);
+  output.clear();
+  output.appendLine(`Copal · ${c.title} · ${c.location}`);
+  output.appendLine(c.signal);
+  if (c.question) output.appendLine(`\n? ${c.question}`);
+  if (c.why) output.appendLine(`\nWhy: ${c.why}`);
+  if (c.example?.bad) output.appendLine(`\nInstead of: ${c.example.bad}`);
+  if (c.example?.good) output.appendLine(`Prefer:     ${c.example.good}`);
+  if (c.kata) output.appendLine(`\nPractice: ${c.kata}`);
+  output.show(true);
+  void coachEvent(f, c.example ? 3 : 2, "explain", ref.uri);
+  if (c.reference && !/^https?:/.test(c.reference)) {
+    const root = rootOf.get(ref.uri);
+    const file = root ? path.join(root, c.reference) : undefined;
+    if (file && fs.existsSync(file)) await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+  } else if (c.reference) output.appendLine(`Reference: ${c.reference}`);
+}
+
+/** Level 4: apply the pattern correction if there is one, otherwise show the fix in words. Recorded. */
+async function showMe(ref: FindingRef) {
+  const f = findingFor(ref);
+  if (!f) return;
+  void coachEvent(f, 4, "show_me", ref.uri);
+  const d = vscode.workspace.textDocuments.find((x) => x.uri.toString() === ref.uri);
+  if (f.suggestion && d) {
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(d.uri, d.lineAt(f.line - 1).range, f.suggestion.replacement);
+    await vscode.workspace.applyEdit(edit);
+    return;
+  }
+  output.clear();
+  output.appendLine(`Copal · Show me · ${f.ruleId}`);
+  output.appendLine(hintCard(f).fix ?? "No fix is defined for this rule — ask your lead to add one.");
+  output.show(true);
+}
+
+/** Navigator: up to 3 questions before the AI builds a feature; the brief goes to the clipboard for the assistant. */
+async function pair() {
+  const d = vscode.window.activeTextEditor?.document;
+  const p = d ? policyFor(d) : null;
+  const task = await vscode.window.showInputBox({ title: "Copal · Pair on a task", prompt: "What are you about to ask the AI to build?", ignoreFocusOut: true });
+  if (!task) return;
+  const s = navigatorQuestions(p?.policy, task, { force: true });
+  const answers: { id: string; text: string }[] = [];
+  for (const [i, q] of s.questions.entries()) {
+    const a = await vscode.window.showInputBox({ title: `Copal navigator ${i + 1}/${s.questions.length}`, prompt: q.text, placeHolder: "Empty = skip", ignoreFocusOut: true });
+    if (a === undefined) break;
+    if (a.trim()) answers.push({ id: q.id, text: a.trim() });
+  }
+  const brief = briefToText(buildBrief(p?.policy, task, s.questions, answers, answers.length === 0));
+  output.clear();
+  output.appendLine(brief);
+  output.show(true);
+  await vscode.env.clipboard.writeText(brief);
+  vscode.window.showInformationMessage("Copal: brief copied — paste it into your AI assistant.");
+}
+
+const rootOf = new Map<string, string>();
 
 class QuickFixes implements vscode.CodeActionProvider {
   static kinds = [vscode.CodeActionKind.QuickFix];
@@ -69,12 +223,33 @@ class QuickFixes implements vscode.CodeActionProvider {
     for (const d of ctx.diagnostics.filter((x) => x.source === SOURCE)) {
       const f = findings.find((x) => x.ruleId === d.code && x.line - 1 === d.range.start.line);
       if (!f) continue;
+      const ref: FindingRef = { uri: doc.uri.toString(), ruleId: f.ruleId, line: f.line };
+      const coached = !!f.coach;
+      if (f.coach?.question) {
+        const a = new vscode.CodeAction(`Copal: Ask me (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
+        a.command = { title: "Ask me", command: "copal.ask", arguments: [ref] };
+        a.diagnostics = [d];
+        actions.push(a);
+      }
+      if (coached) {
+        const a = new vscode.CodeAction(`Copal: Explain (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
+        a.command = { title: "Explain", command: "copal.explain", arguments: [ref] };
+        a.diagnostics = [d];
+        actions.push(a);
+      }
       if (f.suggestion) {
-        const a = new vscode.CodeAction(`Copal: apply correction (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
+        // Level 4. Without coaching it stays the preferred one-click correction; with coaching it is "Show me".
+        const a = new vscode.CodeAction(coached ? `Copal: Show me (${f.ruleId})` : `Copal: apply correction (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
         a.edit = new vscode.WorkspaceEdit();
         a.edit.replace(doc.uri, doc.lineAt(f.line - 1).range, f.suggestion.replacement);
+        a.command = coached ? { title: "record", command: "copal.recordShowMe", arguments: [ref] } : undefined;
         a.diagnostics = [d];
-        a.isPreferred = true;
+        a.isPreferred = !coached;
+        actions.push(a);
+      } else if (f.fixText) {
+        const a = new vscode.CodeAction(`Copal: Show me (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
+        a.command = { title: "Show me", command: "copal.showMe", arguments: [ref] };
+        a.diagnostics = [d];
         actions.push(a);
       }
       const ignore = new vscode.CodeAction(`Copal: mark as false positive (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
@@ -107,6 +282,7 @@ async function flushHeartbeats(ctx: vscode.ExtensionContext) {
 }
 
 export function activate(ctx: vscode.ExtensionContext) {
+  extCtx = ctx;
   diagnostics = vscode.languages.createDiagnosticCollection(SOURCE);
   output = vscode.window.createOutputChannel("Copal");
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
@@ -118,6 +294,15 @@ export function activate(ctx: vscode.ExtensionContext) {
     output,
     status,
     vscode.languages.registerCodeActionsProvider({ scheme: "file" }, new QuickFixes(), { providedCodeActionKinds: QuickFixes.kinds }),
+    vscode.languages.registerHoverProvider({ scheme: "file" }, new Hovers()),
+    vscode.commands.registerCommand("copal.ask", ask),
+    vscode.commands.registerCommand("copal.explain", explain),
+    vscode.commands.registerCommand("copal.showMe", showMe),
+    vscode.commands.registerCommand("copal.recordShowMe", (ref: FindingRef) => {
+      const f = findingFor(ref);
+      if (f) void coachEvent(f, 4, "show_me", ref.uri);
+    }),
+    vscode.commands.registerCommand("copal.pair", pair),
     vscode.workspace.onDidOpenTextDocument(check),
     vscode.workspace.onDidSaveTextDocument((d) => {
       if (path.basename(d.fileName) === ".copalrules") vscode.workspace.textDocuments.forEach(check);

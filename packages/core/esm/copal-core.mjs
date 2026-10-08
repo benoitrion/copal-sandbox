@@ -1,4 +1,4 @@
-/*! @copal/core 0.1.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
+/*! @copal/core 0.2.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
@@ -338,8 +338,158 @@ function inScope(path, include, exclude) {
   return true;
 }
 
+// src/coach.ts
+function containsCode(text) {
+  return /```|`[^`]*[(){};=<>][^`]*`/.test(text) || /\b(import|export|const|let|var|function|class|return|def|public|private)\s+[\w{]/.test(text) || /[;{}]\s*$/m.test(text) || /\w+\([^)]*\)\s*(=>|\{)/.test(text) || /=>/.test(text);
+}
+var HINT_LEVELS = {
+  0: "signal",
+  1: "question",
+  2: "reference",
+  3: "worked-example",
+  4: "fix"
+};
+function hintCard(f) {
+  const c2 = f.coach ?? {};
+  const fix = f.suggestion ? f.suggestion.replacement.trim() : f.fixText;
+  const card = {
+    ruleId: f.ruleId,
+    title: `${f.ruleId} \xB7 ${f.category}`,
+    location: `${f.file}:${f.line}`,
+    signal: f.message,
+    question: c2.question,
+    why: f.why,
+    reference: c2.reference,
+    example: c2.example,
+    fix,
+    kata: c2.kata,
+    learningHour: c2.learningHour,
+    blocking: f.blocking,
+    maxLevel: c2.example ? 3 : c2.reference || f.why ? 2 : c2.question ? 1 : 0
+  };
+  return card;
+}
+function rulesWithoutCoaching(p) {
+  return p.rules.filter((r) => !r.coach?.question).map((r) => r.id);
+}
+function kataSuggestions(policy, occurrences, now = Date.now(), windowDays = 14) {
+  const since = now - windowDays * 864e5;
+  const rules = new Map(policy.rules.map((r) => [r.id, r]));
+  const recent = occurrences.filter((o) => new Date(o.at).getTime() >= since);
+  const out = [];
+  const byRuleDev = /* @__PURE__ */ new Map();
+  for (const o of recent) {
+    const k = `${o.ruleId}\0${o.developer ?? ""}`;
+    byRuleDev.set(k, (byRuleDev.get(k) ?? 0) + 1);
+  }
+  const devsByRule = /* @__PURE__ */ new Map();
+  for (const [k, count] of byRuleDev) {
+    const [ruleId, developer] = k.split("\0");
+    const rule = rules.get(ruleId);
+    if (!rule?.coach) continue;
+    const threshold = rule.coach.escalateAfter ?? 3;
+    if (count >= threshold) {
+      if (!devsByRule.has(ruleId)) devsByRule.set(ruleId, /* @__PURE__ */ new Set());
+      devsByRule.get(ruleId).add(developer);
+      out.push({
+        ruleId,
+        developer: developer || void 0,
+        count,
+        kata: rule.coach.kata,
+        learningHour: rule.coach.learningHour,
+        reason: `${ordinal(count)} ${ruleId} in ${windowDays} days`
+      });
+    }
+  }
+  for (const [ruleId, devs] of devsByRule) {
+    const rule = rules.get(ruleId);
+    if (devs.size >= 2 && rule.coach?.learningHour)
+      out.push({ ruleId, count: devs.size, learningHour: rule.coach.learningHour, reason: `${devs.size} developers hit ${ruleId} this sprint \u2014 learning-hour topic` });
+  }
+  return out.sort((a, b) => b.count - a.count);
+}
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+var SMALL_TASK = /^\s*(fix (a |the )?typo|rename|format|reformat|bump|update (the )?(readme|docs?|changelog)|lint|add (a )?comment|remove unused|sort imports)\b/i;
+var FEATURE_HINT = /\b(add|build|create|implement|introduce|support|feature|endpoint|service|refactor|redesign|migrate|integrate|new)\b/i;
+var OPT_OUT = /\b(just do it|no questions|skip (the )?(navigator|questions)|copal:\s*skip)\b/i;
+function taskScope(task) {
+  const t = task.trim();
+  if (!t || SMALL_TASK.test(t)) return "small";
+  if (FEATURE_HINT.test(t) || t.split(/\s+/).length >= 12) return "feature";
+  return "small";
+}
+function navigatorQuestions(policy, task, opts = {}) {
+  const nav = policy?.navigator ?? {};
+  if (nav.enabled === false) return { engage: false, reason: "navigator disabled in .copalrules", questions: [] };
+  if (OPT_OUT.test(task)) return { engage: false, reason: "developer opted out for this task", questions: [] };
+  if (!opts.force && (nav.minScope ?? "feature") === "feature" && taskScope(task) === "small")
+    return { engage: false, reason: "small task \u2014 no navigator needed", questions: [] };
+  const kinds = (nav.questions?.length ? nav.questions : ["first-example", "placement", "risk"]).slice(0, Math.min(nav.maxQuestions ?? 3, 3));
+  const subject = summarize(task);
+  const boundaries = (policy?.rules ?? []).filter((r) => r.deny).map((r) => r.deny.split(/\s+->\s+/)[0]);
+  const where = opts.files?.length ? ` You mentioned ${opts.files.slice(0, 2).join(", ")}.` : "";
+  const text = {
+    "first-example": `What is the first concrete example ${subject} must handle \u2014 input and expected result? That becomes the first failing test.`,
+    placement: boundaries.length ? `Where does this belong, given the team's boundaries (${boundaries.slice(0, 3).join(", ")})? Which module owns the rule, and what stays outside it?${where}` : `Where does this belong \u2014 which module owns the rule, and what stays outside it?${where}`,
+    risk: "What could go wrong \u2014 which edge case, invalid input or failure must it handle?"
+  };
+  const questions = kinds.map((kind, i) => ({ id: `q${i + 1}`, kind, text: text[kind] }));
+  return { engage: questions.length > 0, reason: questions.length ? "feature-sized task" : "no questions configured", questions: questions.filter((q) => !containsCode(q.text)) };
+}
+function summarize(task) {
+  const t = task.replace(/\s+/g, " ").trim().replace(/[.?!]+$/, "");
+  const short = t.length > 60 ? t.slice(0, 57).replace(/\s+\S*$/, "") + "\u2026" : t;
+  return short ? `"${short}"` : "this change";
+}
+function buildBrief(policy, task, questions, answers, skipped = false) {
+  const byKind = (k) => {
+    const q = questions.find((x) => x.kind === k);
+    const a = q && answers.find((x) => x.id === q.id)?.text?.trim();
+    return a || void 0;
+  };
+  const risk = byKind("risk");
+  const brief = {
+    task,
+    skipped,
+    firstTest: byKind("first-example"),
+    location: byKind("placement"),
+    edgeCases: risk ? risk.split(/\s*(?:;|\n|,\s*(?=and\b)|\band\b)\s*/i).map((s) => s.trim()).filter(Boolean) : [],
+    rules: (policy?.rules ?? []).filter((r) => r.mode !== "off").slice(0, 12).map((r) => ({ id: r.id, what: ruleSummary(r) })),
+    instructions: []
+  };
+  brief.instructions = [
+    brief.firstTest ? `Start with one failing test for: ${brief.firstTest}. Make it pass with the simplest code, then refactor.` : "Start with one failing test for the simplest case, make it pass, then refactor.",
+    brief.location ? `Put the logic where the developer said: ${brief.location}.` : "Ask the developer where the logic belongs before creating new modules.",
+    ...brief.edgeCases.map((e) => `Add a test for: ${e}.`),
+    "Work in small steps: one test at a time, run the tests after each step, stop and ask when a design choice is not covered.",
+    "Respect the Copal rules listed in the brief; explain any rule you think should not apply instead of working around it."
+  ];
+  return brief;
+}
+function briefToText(b) {
+  const out = [`Copal navigator brief \u2014 ${b.skipped ? "developer skipped the questions" : "agreed with the developer"}`, `Task: ${b.task}`];
+  if (b.firstTest) out.push(`First failing test: ${b.firstTest}`);
+  if (b.location) out.push(`Location: ${b.location}`);
+  if (b.edgeCases.length) out.push(`Edge cases: ${b.edgeCases.join("; ")}`);
+  out.push("", "How to work:", ...b.instructions.map((i) => `- ${i}`));
+  if (b.rules.length) out.push("", "Team rules:", ...b.rules.map((r) => `- ${r.id}: ${r.what}`));
+  return out.join("\n");
+}
+function ruleSummary(r) {
+  if (r.deny) return `no imports across ${r.deny}`;
+  if (r.secrets) return "no hard-coded credentials";
+  if (r.dependencies) return `dependencies allowed: ${r.dependencies.allow?.join(", ") || "any"}`;
+  if (r.requireTest) return `changes need a test matching ${r.requireTest.test}`;
+  return r.message ?? r.why ?? `avoid /${r.pattern}/`;
+}
+
 // src/policy.ts
 var POLICY_FILE = ".copalrules";
+var SUPPORTED_VERSIONS = [3, 4];
+var SAMMAN = "https://sammancoaching.org/kata_descriptions";
 var BUILTIN_PACKS = {
   security: {
     version: 3,
@@ -350,7 +500,11 @@ var BUILTIN_PACKS = {
         mode: "enforce",
         severity: "error",
         secrets: true,
-        why: "Credentials in source end up in git history, prompts and logs. Load them from the secret manager."
+        why: "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+        coach: {
+          question: "Where should this value live so it never reaches git, a prompt or a log?",
+          example: { bad: 'const key = "AKIA\u2026"', good: "const key = config.require('PAYMENTS_KEY')" }
+        }
       },
       {
         id: "sql-injection",
@@ -359,7 +513,11 @@ var BUILTIN_PACKS = {
         severity: "error",
         pattern: `\\.(query|execute|raw)\\(\\s*(\`[^\`]*\\$\\{|["'][^"']*["']\\s*\\+)`,
         message: "SQL built by string concatenation/interpolation",
-        why: "Use parameterised queries so user input can never change the statement."
+        why: "Use parameterised queries so user input can never change the statement.",
+        coach: {
+          question: "What happens to this statement if the input contains a quote?",
+          example: { bad: "db.query(`SELECT * FROM t WHERE id = ${id}`)", good: "db.query('SELECT * FROM t WHERE id = $1', [id])" }
+        }
       },
       {
         id: "path-traversal",
@@ -368,7 +526,8 @@ var BUILTIN_PACKS = {
         severity: "warning",
         pattern: "(readFile|readFileSync|createReadStream|sendFile)\\([^)]*req\\.(params|query|body)",
         message: "File path built from request input",
-        why: "Resolve against an allow-listed base directory and reject '..' segments."
+        why: "Resolve against an allow-listed base directory and reject '..' segments.",
+        coach: { question: "Which files should a caller be able to reach through this endpoint \u2014 and which must they never reach?" }
       }
     ]
   },
@@ -384,7 +543,8 @@ var BUILTIN_PACKS = {
         paths: ["**/*.{ts,tsx,js,jsx}"],
         exclude: ["**/*.test.*", "**/scripts/**"],
         message: "console.log left in production code",
-        why: "Use the structured logger so output is levelled and redacted."
+        why: "Use the structured logger so output is levelled and redacted.",
+        coach: { question: "Who will read this output in production, and how will they filter or redact it?" }
       },
       {
         id: "no-explicit-any",
@@ -394,7 +554,108 @@ var BUILTIN_PACKS = {
         pattern: ":\\s*any\\b",
         paths: ["**/*.{ts,tsx}"],
         message: "Explicit `any` disables type checking",
-        why: "Prefer a precise type or `unknown` with narrowing."
+        why: "Prefer a precise type or `unknown` with narrowing.",
+        coach: {
+          question: "What do you actually know about this value's shape here?",
+          example: { bad: "function parse(x: any)", good: "function parse(x: unknown) { if (typeof x === 'string') \u2026 }" }
+        }
+      }
+    ]
+  },
+  testing: {
+    version: 4,
+    rules: [
+      {
+        id: "focused-test",
+        category: "testing",
+        mode: "enforce",
+        severity: "error",
+        pattern: "\\b(it|test|describe)\\.only\\(|\\bf(it|describe)\\(",
+        paths: ["**/*.{test,spec}.{ts,tsx,js,jsx}"],
+        message: "Focused test (.only) silently disables the rest of the suite",
+        why: "A focused test makes CI green while skipping everything else.",
+        coach: { question: "Which other tests stop running while this one is focused?" }
+      },
+      {
+        id: "skipped-test",
+        category: "testing",
+        mode: "audit",
+        severity: "warning",
+        pattern: "\\b(it|test|describe)\\.skip\\(|\\bx(it|describe)\\(",
+        paths: ["**/*.{test,spec}.{ts,tsx,js,jsx}"],
+        message: "Skipped test",
+        why: "Skipped tests rot. Fix it, delete it, or track it with a ticket.",
+        coach: {
+          question: "What would have to be true for this test to run again \u2014 and who will make it true?",
+          kata: `${SAMMAN}/string_calculator.html`,
+          learningHour: "test-first-small-steps"
+        }
+      }
+    ]
+  },
+  hexagonal: {
+    version: 4,
+    rules: [
+      {
+        id: "domain-no-infra",
+        category: "architecture",
+        mode: "audit",
+        severity: "warning",
+        deny: "**/domain/** -> **/infra/**, **/infrastructure/**, **/adapters/**",
+        why: "The domain must not depend on technical details; adapters depend on the domain through ports.",
+        coach: {
+          question: "Who should own this dependency \u2014 the domain, or an adapter behind a port?",
+          example: { bad: "import { http } from '../infra/http'", good: "constructor(private readonly payments: PaymentPort) {}" },
+          kata: `${SAMMAN}/birthday_greetings.html`,
+          learningHour: "ports-and-adapters"
+        },
+        fix: "Declare a port (interface) in the domain, implement it in an adapter, and inject it."
+      },
+      {
+        id: "domain-no-framework",
+        category: "architecture",
+        mode: "audit",
+        severity: "warning",
+        pattern: `from\\s+["'](express|fastify|@nestjs/[\\w-]+|pg|mysql2|mongoose|axios|typeorm|prisma)["']`,
+        paths: ["**/domain/**"],
+        message: "Framework or driver imported into the domain",
+        why: "Framework code in the domain makes business rules hard to test and to move.",
+        coach: {
+          question: "Could you test this business rule without starting a server or a database?",
+          kata: `${SAMMAN}/tire_pressure.html`,
+          learningHour: "ports-and-adapters"
+        }
+      }
+    ]
+  },
+  "clean-code": {
+    version: 4,
+    rules: [
+      {
+        id: "magic-number-money",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        pattern: "\\*\\s*0?\\.\\d{2,}\\b",
+        paths: ["**/*.{ts,tsx,js,jsx}"],
+        exclude: ["**/*.test.*", "**/*.spec.*"],
+        message: "Unnamed rate or ratio in arithmetic",
+        why: "A named constant or domain concept says what the number means and where it may change.",
+        coach: {
+          question: "What is this number called in the business, and where else does it appear?",
+          kata: `${SAMMAN}/supermarket_receipt.html`,
+          learningHour: "naming-domain-concepts"
+        }
+      },
+      {
+        id: "todo-without-ticket",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        pattern: "\\b(TODO|FIXME)\\b(?!.*[A-Z]+-\\d+)",
+        message: "TODO without a ticket reference",
+        why: "Untracked TODOs become permanent.",
+        coach: { question: "Is this a decision for now, or a task someone needs to pick up \u2014 and where is it tracked?" }
       }
     ]
   }
@@ -414,7 +675,14 @@ var BUILTIN_REDACT = [
 var KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest"];
 function validatePolicy(p) {
   const issues = [];
-  if (p.version !== 3) issues.push({ message: `unsupported version ${p.version} (expected 3)` });
+  if (!SUPPORTED_VERSIONS.includes(p.version)) issues.push({ message: `unsupported version ${p.version} (expected ${SUPPORTED_VERSIONS.join(" or ")})` });
+  if (p.mode && !["coach", "audit", "enforce"].includes(p.mode)) issues.push({ message: `invalid policy mode "${p.mode}" (coach | audit | enforce)` });
+  if (p.navigator) {
+    const n = p.navigator;
+    if (n.maxQuestions !== void 0 && !(n.maxQuestions >= 0 && n.maxQuestions <= 3)) issues.push({ message: "navigator.maxQuestions must be between 0 and 3" });
+    for (const q of n.questions ?? []) if (!["first-example", "placement", "risk"].includes(q)) issues.push({ message: `unknown navigator question "${q}"` });
+    if (n.minScope && !["feature", "any"].includes(n.minScope)) issues.push({ message: `navigator.minScope must be feature or any` });
+  }
   const seen = /* @__PURE__ */ new Set();
   for (const r of p.rules ?? []) {
     if (!r.id) issues.push({ message: "rule without id" });
@@ -424,6 +692,8 @@ function validatePolicy(p) {
     if (kinds.length !== 1) issues.push({ ruleId: r.id, message: `expected exactly one of ${KINDS.join(", ")}; got ${kinds.join(", ") || "none"}` });
     if (r.mode && !["audit", "enforce", "off"].includes(r.mode)) issues.push({ ruleId: r.id, message: `invalid mode "${r.mode}"` });
     if (r.deny && !/\s->\s/.test(r.deny)) issues.push({ ruleId: r.id, message: 'deny must look like "from/** -> to/**"' });
+    if (r.coach?.question && containsCode(r.coach.question)) issues.push({ ruleId: r.id, message: "coach.question must not contain code \u2014 ask, don't answer" });
+    if (r.coach?.escalateAfter !== void 0 && !(r.coach.escalateAfter >= 1)) issues.push({ ruleId: r.id, message: "coach.escalateAfter must be \u2265 1" });
     if (r.pattern) {
       try {
         new RegExp(r.pattern, r.flags);
@@ -441,11 +711,19 @@ function normalize(raw, origin) {
   return {
     version: Number(o.version ?? 3),
     project: o.project,
+    mode: o.mode,
+    navigator: o.navigator ?? void 0,
     extends: ext === void 0 || ext === null ? [] : Array.isArray(ext) ? ext : [String(ext)],
-    rules: (o.rules ?? []).map((r) => ({ ...r, paths: toArr(r.paths), exclude: toArr(r.exclude), sources: toArr(r.sources) })),
+    rules: (o.rules ?? []).map((r) => normalizeRule({ ...r, paths: toArr(r.paths), exclude: toArr(r.exclude), sources: toArr(r.sources) })),
     redact: o.redact ?? [],
     environments: o.environments ?? {}
   };
+}
+function normalizeRule(r) {
+  const sev = r.severity;
+  if (sev === "block") return { ...r, mode: r.mode ?? "enforce", severity: "error" };
+  if (sev === "audit") return { ...r, mode: r.mode ?? "audit", severity: "warning" };
+  return r;
 }
 function toArr(v) {
   if (v === void 0 || v === null) return void 0;
@@ -465,8 +743,10 @@ function mergePolicies(parent, child) {
     envs[name] = { rules: { ...envs[name]?.rules ?? {}, ...env?.rules ?? {} } };
   }
   return {
-    version: child.version,
+    version: Math.max(child.version, parent.version),
     project: child.project ?? parent.project,
+    mode: child.mode ?? parent.mode,
+    navigator: child.navigator ?? parent.navigator,
     rules: [...byId.values()],
     redact: [...parent.redact ?? [], ...child.redact ?? []],
     environments: envs
@@ -491,11 +771,13 @@ function resolvePolicy(p, baseDir = ".", loader, depth = 0) {
     }
     acc = mergePolicies(acc, parent);
   }
-  return mergePolicies(acc, { ...p, extends: [] });
+  const merged = mergePolicies(acc, { ...p, extends: [] });
+  return { ...merged, version: p.version };
 }
 function effectiveRules(p, environment = "local") {
   const ov = p.environments?.[environment]?.rules ?? {};
-  return p.rules.map((r) => ({ ...r, ...ov[r.id] ?? {}, mode: (ov[r.id]?.mode ?? r.mode) || "audit" })).filter((r) => r.mode !== "off");
+  const fallback = p.mode === "enforce" ? "enforce" : "audit";
+  return p.rules.map((r) => ({ ...r, ...ov[r.id] ?? {}, mode: (ov[r.id]?.mode ?? r.mode) || fallback })).filter((r) => r.mode !== "off");
 }
 
 // src/diff.ts
@@ -623,6 +905,7 @@ function evaluate(changes, policy, opts = {}) {
   const blocking = findings.filter((f) => f.blocking).length;
   return {
     environment,
+    policyMode: policy.mode ?? (policy.version >= 4 ? "coach" : "audit"),
     findings,
     blocking: blocking > 0,
     summary: { total: findings.length, blocking, audit: findings.length - blocking, byCategory },
@@ -642,7 +925,9 @@ function base(rule, file, line, message, cat, sev) {
     line,
     message: rule.message ?? message,
     why: rule.why,
-    sources: rule.sources
+    sources: rule.sources,
+    ...rule.coach ? { coach: rule.coach } : {},
+    ...typeof rule.fix === "string" ? { fixText: rule.fix } : {}
   };
 }
 function isSuppressed(file, f) {
@@ -692,7 +977,7 @@ function checkPattern(rule, file) {
     const f = base(rule, file.path, line, `Matches forbidden pattern of rule ${rule.id}`, "quality", "warning");
     f.column = m.index + 1;
     f.endColumn = m.index + m[0].length + 1;
-    if (rule.fix) {
+    if (rule.fix && typeof rule.fix === "object") {
       const fixRx = new RegExp(rule.fix.replace ?? rule.pattern, flags);
       const replacement = text.replace(fixRx, rule.fix.with);
       if (replacement !== text) f.suggestion = { original: text, replacement };
@@ -806,36 +1091,73 @@ var green = c(32);
 var dim = c(2);
 var bold = c(1);
 var cyan = c(36);
-function formatFinding(f) {
-  const tag = f.blocking ? red("BLOCK") : yellow("AUDIT");
+var coaching = (r) => r.policyMode === "coach";
+function formatFinding(f, opts = {}) {
+  const showMe = opts.showMe ?? !f.coach;
+  const explain = opts.explain ?? true;
+  const card = hintCard(f);
+  const tag = f.blocking ? red("BLOCK") : f.coach ? cyan("COACH") : yellow("AUDIT");
   const lines = [`${tag} ${bold(`${f.file}:${f.line}${f.column ? ":" + f.column : ""}`)}  ${f.message}  ${dim(`[${f.ruleId}]`)}`];
-  if (f.why) lines.push(`      ${dim("why:")} ${f.why}`);
-  if (f.suggestion) {
-    lines.push(`      ${red("- " + f.suggestion.original.trim())}`);
-    lines.push(`      ${green("+ " + f.suggestion.replacement.trim())}`);
+  if (card.question) lines.push(`      ${cyan("?")} ${card.question}`);
+  if (explain) {
+    if (f.why) lines.push(`      ${dim("why:")} ${f.why}`);
+    if (card.reference) lines.push(`      ${dim("explain:")} ${card.reference}`);
+    if (card.example?.bad) lines.push(`      ${dim("instead of:")} ${card.example.bad}`);
+    if (card.example?.good) lines.push(`      ${dim("prefer:")}     ${card.example.good}`);
   }
+  if (showMe) {
+    if (f.suggestion) {
+      lines.push(`      ${red("- " + f.suggestion.original.trim())}`);
+      lines.push(`      ${green("+ " + f.suggestion.replacement.trim())}`);
+    } else if (f.fixText) lines.push(`      ${dim("fix:")} ${f.fixText}`);
+  } else if (card.fix) lines.push(`      ${dim("show me: copal check --show-me")}`);
+  if (card.kata) lines.push(`      ${dim("practice:")} ${card.kata}`);
   if (f.sources?.length) lines.push(`      ${dim("sources: " + f.sources.join(" \xB7 "))}`);
   return lines.join("\n");
 }
-function formatReport(r) {
+function formatReport(r, opts = {}) {
   if (!r.findings.length) return green(`\u2714 Copal: ${r.filesChecked} file(s), ${r.rulesEvaluated} rule(s), no findings (${r.environment}).`);
-  const head = r.blocking ? red(bold(`\u2716 Copal: ${r.summary.blocking} blocking finding(s)`)) + `, ${r.summary.audit} audit-only` : yellow(bold(`\u26A0 Copal: ${r.summary.audit} audit finding(s)`)) + " (nothing blocking)";
-  return [head + dim(` \u2014 env ${r.environment}, ${r.filesChecked} file(s), ${r.rulesEvaluated} rule(s)`), "", ...r.findings.map(formatFinding)].join("\n");
+  const head = r.blocking ? red(bold(`\u2716 Copal: ${r.summary.blocking} blocking finding(s)`)) + `, ${r.summary.audit} audit-only` : coaching(r) ? cyan(bold(`\u25C7 Copal: ${r.summary.audit} hint(s) to think about`)) + " (nothing blocking)" : yellow(bold(`\u26A0 Copal: ${r.summary.audit} audit finding(s)`)) + " (nothing blocking)";
+  const fopts = { ...opts, showMe: opts.showMe ?? (coaching(r) ? false : void 0) };
+  return [head + dim(` \u2014 env ${r.environment}, ${r.filesChecked} file(s), ${r.rulesEvaluated} rule(s)`), "", ...r.findings.map((f) => formatFinding(f, fopts))].join("\n");
 }
 function reportToMarkdown(r, title = "Copal check") {
   const status = r.blocking ? "\u{1F534} **Changes requested**" : r.findings.length ? "\u{1F7E1} **Passed with audit findings**" : "\u{1F7E2} **Passed**";
   const out = [`### ${title}`, "", `${status} \u2014 ${r.summary.blocking} blocking \xB7 ${r.summary.audit} audit \xB7 env \`${r.environment}\``, ""];
   if (r.findings.length) {
     out.push("| | Rule | Location | Finding |", "|---|---|---|---|");
-    for (const f of r.findings) out.push(`| ${f.blocking ? "\u26D4" : "\u26A0\uFE0F"} | \`${f.ruleId}\` | \`${f.file}:${f.line}\` | ${f.message.replace(/\|/g, "\\|")} |`);
+    for (const f of r.findings) {
+      const text = f.coach?.question ? `${f.message} \u2014 _${f.coach.question}_` : f.message;
+      out.push(`| ${f.blocking ? "\u26D4" : f.coach ? "\u{1F4AC}" : "\u26A0\uFE0F"} | \`${f.ruleId}\` | \`${f.file}:${f.line}\` | ${text.replace(/\|/g, "\\|")} |`);
+    }
   }
   out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
   return out.join("\n");
 }
 function findingToMarkdown(f) {
-  const out = [`**${f.blocking ? "\u26D4 Copal (enforce)" : "\u26A0\uFE0F Copal (audit)"}** \xB7 \`${f.ruleId}\``, "", f.message];
-  if (f.why) out.push("", `> ${f.why}`);
-  if (f.suggestion) out.push("", "```suggestion", f.suggestion.replacement, "```");
+  const card = hintCard(f);
+  const head = f.blocking ? "\u26D4 Copal (blocking)" : f.coach ? "\u{1F4AC} Copal coach" : "\u26A0\uFE0F Copal (audit)";
+  const out = [`**${head}** \xB7 \`${f.ruleId}\``, "", f.message];
+  if (card.question) out.push("", `**${card.question}**`);
+  const explain = [];
+  if (f.why) explain.push(f.why);
+  if (card.reference) explain.push(`Reference: ${card.reference}`);
+  if (card.example?.bad) explain.push(`Instead of: \`${card.example.bad}\``);
+  if (card.example?.good) explain.push(`Prefer: \`${card.example.good}\``);
+  if (explain.length) out.push("", f.coach ? `<details><summary>Explain</summary>
+
+${explain.join("\n\n")}
+
+</details>` : `> ${explain.join("\n> ")}`);
+  if (f.suggestion && !f.coach) out.push("", "```suggestion", f.suggestion.replacement, "```");
+  else if (card.fix) out.push("", `<details><summary>Show me</summary>
+
+\`\`\`
+${card.fix}
+\`\`\`
+
+</details>`);
+  if (card.kata) out.push("", `<sub>Practice: ${card.kata}${card.learningHour ? ` \xB7 learning hour: ${card.learningHour}` : ""}</sub>`);
   if (f.sources?.length) out.push("", `<sub>Sources: ${f.sources.join(" \xB7 ")}</sub>`);
   return out.join("\n");
 }
@@ -844,17 +1166,24 @@ function rulesToGuidance(rules, filePath) {
   const out = [`Copal engineering policy${filePath ? ` for ${filePath}` : ""} \u2014 follow these rules when writing code:`, ""];
   for (const r of rules) {
     const what = r.deny ? `Do not import across: ${r.deny}` : r.dependencies ? `Dependencies \u2014 allowed: ${r.dependencies.allow?.join(", ") || "any"}; denied: ${r.dependencies.deny?.join(", ") || "none"}` : r.secrets ? "Never hard-code credentials; read them from configuration/secret manager." : r.requireTest ? `Add/update a test matching ${r.requireTest.test}` : r.message ?? `Avoid pattern /${r.pattern}/`;
-    out.push(`- [${r.mode === "enforce" ? "ENFORCED" : "audit"}] ${r.id}: ${what}${r.why ? ` \u2014 ${r.why}` : ""}${r.fix ? ` (preferred: ${r.fix.with})` : ""}`);
+    const fix = typeof r.fix === "string" ? r.fix : r.fix?.with;
+    out.push(`- [${r.mode === "enforce" ? "ENFORCED" : "audit"}] ${r.id}: ${what}${r.why ? ` \u2014 ${r.why}` : ""}${fix ? ` (preferred: ${fix})` : ""}`);
+    if (r.coach?.question) out.push(`  Ask the developer before writing this kind of code: "${r.coach.question}"`);
   }
   return out.join("\n");
 }
 export {
   BUILTIN_PACKS,
   BUILTIN_REDACT,
+  HINT_LEVELS,
   POLICY_FILE,
+  SUPPORTED_VERSIONS,
   YamlError,
   applicableRules,
   bold,
+  briefToText,
+  buildBrief,
+  containsCode,
   cyan,
   dim,
   effectiveRules,
@@ -865,10 +1194,13 @@ export {
   formatReport,
   globToRegExp,
   green,
+  hintCard,
   inScope,
+  kataSuggestions,
   mask,
   matchGlob,
   mergePolicies,
+  navigatorQuestions,
   normalizePath,
   parseDeny,
   parsePolicy,
@@ -879,8 +1211,11 @@ export {
   redact,
   reportToMarkdown,
   resolvePolicy,
+  ruleSummary,
   rulesToGuidance,
+  rulesWithoutCoaching,
   scalar,
+  taskScope,
   toYaml,
   validatePolicy,
   yellow

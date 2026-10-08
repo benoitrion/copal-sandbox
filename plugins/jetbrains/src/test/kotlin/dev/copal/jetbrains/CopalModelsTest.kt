@@ -46,4 +46,30 @@ class CopalModelsTest {
         assertNull(CopalText.commentPrefix("package.json"))
         assertEquals("  // copal-ignore ledger-rounding\n", CopalText.ignoreLine("  ", "//", "ledger-rounding"))
     }
+
+    @Test
+    fun coachedFindingsLeadWithTheQuestion() {
+        val json = """{"policyMode":"coach","findings":[{"ruleId":"ledger-rounding","severity":"error","mode":"audit","blocking":false,"file":"src/invoice/total.ts","line":8,"message":"Inline rounding bypasses LedgerPort","why":"Rounding in one place keeps invoices and the ledger reconciled.","coach":{"question":"Who owns rounding in this codebase?","reference":"docs/rules/ledger-rounding.md","example":{"bad":"Math.round(x * 100) / 100","good":"LedgerPort.round(x, Currency.EUR)"},"kata":"https://sammancoaching.org/kata_descriptions/supermarket_receipt.html"},"suggestion":{"original":"a","replacement":"  const total = LedgerPort.round(sum, Currency.EUR);"}}],"blocking":false,"summary":{"total":1,"blocking":0,"audit":1}}"""
+        val r = CopalJson.parseReport(json)!!
+        assertEquals("coach", r.policyMode)
+        val f = r.findings[0]
+        assertTrue(f.coached)
+        assertEquals("const total = LedgerPort.round(sum, Currency.EUR);", f.fix)
+        assertEquals("Copal [ledger-rounding] Inline rounding bypasses LedgerPort — Who owns rounding in this codebase?", CopalText.message(f))
+        val tip = CopalText.tooltipHtml(f)
+        assertTrue(tip.contains("<b>Who owns rounding in this codebase?</b>"))
+        assertTrue(tip.contains("Ask me · Explain · Show me"))
+        assertTrue("fix stays hidden until Show me", !tip.contains("LedgerPort.round(sum"))
+        assertEquals(3, CopalText.explainLevel(f))
+        assertTrue(CopalText.explainText(f).contains("Prefer:     LedgerPort.round(x, Currency.EUR)"))
+    }
+
+    @Test
+    fun parsesNavigatorSession() {
+        val r = CopalJson.parseReflect("""{"sessionId":"local_x","engage":true,"reason":"feature-sized task","questions":[{"id":"q1","kind":"first-example","text":"What is the first example?"}],"mode":"local"}""")!!
+        assertTrue(r.engage)
+        assertEquals("first-example", r.questions[0].kind)
+        val json = CopalJson.answersJson(AnswersInput(r.sessionId, r.questions, listOf(NavigatorAnswer("q1", "100 net gives 121")), skipped = false))
+        assertTrue(json.contains("\"answers\":[{\"id\":\"q1\",\"text\":\"100 net gives 121\"}]"))
+    }
 }

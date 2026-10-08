@@ -19,6 +19,12 @@ const r = await call("tools/call", { name: "copal_get_rules", arguments: { path:
 console.log("\n" + r.result.content[0].text);
 const c = await call("tools/call", { name: "copal_check_code", arguments: { path: "src/web/x.ts", content: 'import { InvoiceRepo } from "../persistence/invoice-repo";\n' } });
 console.log("\n" + c.result.content[0].text);
+const nav = await call("tools/call", { name: "copal_reflect", arguments: { task: "Add VAT calculation to invoice totals for EU customers" } });
+console.log("\n" + nav.result.content[0].text);
+const sid = nav.result.structuredContent?.sessionId;
+const brief = await call("tools/call", { name: "copal_brief", arguments: { sessionId: sid, answers: [{ id: "q1", text: "100 EUR net in BE gives 121 EUR gross" }, { id: "q2", text: "src/invoice/vat.ts, pure function" }, { id: "q3", text: "negative amounts; unknown country" }] } });
+console.log("\n" + brief.result.content[0].text);
+if (!/First failing test: 100 EUR/.test(brief.result.content[0].text)) { console.error("navigator brief missing"); process.exit(1); }
 const sess = await call("tools/call", { name: "copal_report_session", arguments: { agent: "smoke-agent", tokens: 18250 } });
 console.log("\n" + sess.result.content[0].text);
 p.stdin.end();

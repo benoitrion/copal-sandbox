@@ -1,6 +1,6 @@
 {
   "name": "@copal/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Copal rule engine: .copalrules parser, evaluator and redaction. Isomorphic ESM build for Deno/Supabase Edge and browsers.",
   "license": "UNLICENSED",
   "repository": {

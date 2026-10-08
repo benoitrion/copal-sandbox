@@ -65,10 +65,15 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
                 f.severity == "info" -> HighlightSeverity.WEAK_WARNING
                 else -> HighlightSeverity.WARNING
             }
-            var builder = holder.newAnnotation(severity, "Copal [${f.ruleId}] ${f.message}")
+            var builder = holder.newAnnotation(severity, CopalText.message(f))
                 .range(range)
                 .tooltip(CopalText.tooltipHtml(f))
-            if (f.suggestion != null) builder = builder.withFix(ApplySuggestionFix(f))
+            if (f.coached) {
+                // Hint ladder: question first, explanation next, the fix only on request.
+                if (f.coach?.question != null) builder = builder.withFix(AskMeFix(f))
+                builder = builder.withFix(ExplainFix(f))
+                if (f.fix != null) builder = builder.withFix(ShowMeFix(f))
+            } else if (f.suggestion != null) builder = builder.withFix(ApplySuggestionFix(f))
             if (CopalText.commentPrefix(file.name) != null) builder = builder.withFix(MarkFalsePositiveFix(f))
             builder.create()
         }

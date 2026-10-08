@@ -9,6 +9,17 @@ data class Suggestion(
     val replacement: String = "",
 )
 
+/** Coaching content of a rule (.copalrules v4). */
+data class Example(val bad: String? = null, val good: String? = null)
+
+data class Coach(
+    val question: String? = null,
+    val reference: String? = null,
+    val example: Example? = null,
+    val kata: String? = null,
+    val learningHour: String? = null,
+)
+
 data class Finding(
     val ruleId: String = "",
     val category: String? = null,
@@ -22,8 +33,14 @@ data class Finding(
     val message: String = "",
     val why: String? = null,
     val suggestion: Suggestion? = null,
+    val fixText: String? = null,
     val sources: List<String>? = null,
-)
+    val coach: Coach? = null,
+) {
+    /** Level-4 content ("Show me"): the concrete replacement, or the fix described in words. */
+    val fix: String? get() = suggestion?.replacement?.trim() ?: fixText
+    val coached: Boolean get() = coach != null
+}
 
 data class Summary(
     val total: Int = 0,
@@ -32,6 +49,7 @@ data class Summary(
 )
 
 data class Report(
+    val policyMode: String? = null,
     val findings: List<Finding> = emptyList(),
     val blocking: Boolean = false,
     val summary: Summary = Summary(),
@@ -40,8 +58,39 @@ data class Report(
     val file: String? = null,
 )
 
+/** Navigator mode (`copal reflect TASK --json`). */
+data class NavigatorQuestion(val id: String = "", val kind: String = "", val text: String = "")
+
+data class ReflectResult(
+    val sessionId: String = "",
+    val engage: Boolean = false,
+    val reason: String? = null,
+    val questions: List<NavigatorQuestion> = emptyList(),
+    val mode: String = "local",
+)
+
+data class NavigatorAnswer(val id: String, val text: String)
+
+data class AnswersInput(
+    val sessionId: String,
+    val questions: List<NavigatorQuestion>,
+    val answers: List<NavigatorAnswer>,
+    val skipped: Boolean,
+)
+
 object CopalJson {
     private val gson = Gson()
+
+    fun parseReflect(stdout: String): ReflectResult? {
+        val json = stdout.trim().let { s -> s.substring(s.indexOf('{').coerceAtLeast(0)) }
+        return try {
+            gson.fromJson(json, ReflectResult::class.java)
+        } catch (e: JsonParseException) {
+            null
+        }
+    }
+
+    fun answersJson(input: AnswersInput): String = gson.toJson(input)
 
     /** Parses the last JSON object line printed by the CLI (warnings may precede it). */
     fun parseReport(stdout: String): Report? {
@@ -81,12 +130,47 @@ object CopalText {
         return start until end
     }
 
+    private val esc = { s: String -> s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") }
+
+    /** Annotation message: the question leads when the rule is coached. */
+    fun message(f: Finding): String =
+        f.coach?.question?.let { "Copal [${f.ruleId}] ${f.message} — $it" } ?: "Copal [${f.ruleId}] ${f.message}"
+
+    /**
+     * Hint card tooltip. Coached findings show level 0–1 (signal + question) and point to Alt+Enter for
+     * Ask me · Explain · Show me; the fix is never displayed here. Uncoached findings keep the classic diff.
+     */
     fun tooltipHtml(f: Finding): String {
-        val esc = { s: String -> s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") }
-        val sb = StringBuilder("<html><b>Copal</b> · <code>${esc(f.ruleId)}</code> · ${if (f.blocking) "enforce" else "audit"}<br/>${esc(f.message)}")
-        f.why?.let { sb.append("<br/><i>${esc(it)}</i>") }
-        f.suggestion?.let { sb.append("<br/><code>- ${esc(it.original.trim())}</code><br/><code>+ ${esc(it.replacement.trim())}</code>") }
+        val stance = if (f.blocking) "blocking" else if (f.coached) "coach" else "audit"
+        val sb = StringBuilder("<html><b>Copal</b> · <code>${esc(f.ruleId)}</code> · $stance<br/>${esc(f.message)}")
+        val q = f.coach?.question
+        if (q != null) {
+            sb.append("<br/><br/><b>${esc(q)}</b>")
+            sb.append("<br/><small>Alt+Enter → Ask me · Explain · Show me</small>")
+        } else {
+            f.why?.let { sb.append("<br/><i>${esc(it)}</i>") }
+            f.suggestion?.let { sb.append("<br/><code>- ${esc(it.original.trim())}</code><br/><code>+ ${esc(it.replacement.trim())}</code>") }
+        }
+        f.coach?.kata?.let { sb.append("<br/><small>Practice: ${esc(it)}</small>") }
         f.sources?.takeIf { it.isNotEmpty() }?.let { sb.append("<br/><small>Sources: ${esc(it.joinToString(" · "))}</small>") }
         return sb.append("</html>").toString()
+    }
+
+    /** Level 2–3: why, reference, wrong vs right — plain text for a dialog. */
+    fun explainText(f: Finding): String = buildString {
+        appendLine(f.message)
+        f.coach?.question?.let { appendLine(); appendLine("? $it") }
+        f.why?.let { appendLine(); appendLine("Why: $it") }
+        f.coach?.reference?.let { appendLine("Reference: $it") }
+        f.coach?.example?.bad?.let { appendLine(); appendLine("Instead of: $it") }
+        f.coach?.example?.good?.let { appendLine("Prefer:     $it") }
+        f.coach?.kata?.let { appendLine(); appendLine("Practice: $it") }
+    }.trimEnd()
+
+    /** Highest ladder level reachable without "Show me" (0 signal · 1 question · 2 reference · 3 example). */
+    fun explainLevel(f: Finding): Int = when {
+        f.coach?.example != null -> 3
+        f.coach?.reference != null || f.why != null -> 2
+        else -> 1
     }
 }

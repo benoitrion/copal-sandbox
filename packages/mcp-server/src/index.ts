@@ -8,7 +8,7 @@
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { applicableRules, evaluate, fileAsChange, formatReport, parseUnifiedDiff, redact, rulesToGuidance, toYaml, effectiveRules } from "@copal/core";
+import { applicableRules, briefToText, evaluate, fileAsChange, formatReport, hintCard, parseUnifiedDiff, redact, rulesToGuidance, toYaml, effectiveRules, NavigatorQuestion } from "@copal/core";
 import { CopalClient, loadConfig, loadRepoPolicy } from "@copal/client";
 import { McpServer, text } from "./protocol";
 
@@ -28,10 +28,13 @@ const rel = (p: string) => {
 };
 
 const server = new McpServer(
-  { name: "copal", version: "0.1.0" },
-  `Copal enforces this repository's engineering policy (.copalrules). Before creating or editing a file, call copal_get_rules with its path and follow the ENFORCED rules. ` +
-    `After drafting, call copal_check_code (or copal_check_staged before committing) and apply the suggested corrections. Never paste secrets into prompts; use copal_redact.`,
+  { name: "copal", version: "0.2.0" },
+  `Copal is the team's technical coach. You are the driver; the developer is the navigator. ` +
+    `For any feature-sized task, call copal_reflect FIRST and ask the developer its questions (verbatim, numbered, in one message), wait for their answers, then call copal_brief and follow the brief: first failing test, small steps, code where the developer said. ` +
+    `Before creating or editing a file, call copal_get_rules with its path and follow the ENFORCED rules. After drafting, call copal_check_code (or copal_check_staged before committing). ` +
+    `When a finding carries a question, relay the question to the developer instead of silently fixing it — unless they asked you to just fix it. Never paste secrets into prompts; use copal_redact.`,
 );
+const sessions = new Map<string, { task: string; questions: NavigatorQuestion[] }>();
 
 server.tool({
   name: "copal_get_rules",
@@ -72,7 +75,71 @@ server.tool({
     const report = evaluate([fileAsChange(rel(p), content)], r.policy, { environment: environment ?? defaultEnv });
     stats.checks++;
     stats.findings += report.findings.length;
-    return text(stripAnsi(formatReport(report)), report);
+    return text(stripAnsi(formatReport(report, { showMe: true })) + coachNote(report.findings), { ...report, hints: report.findings.map(hintCard) });
+  },
+});
+
+server.tool({
+  name: "copal_reflect",
+  title: "Navigator: questions before building",
+  description:
+    "Call before implementing a feature-sized task. Returns up to 3 questions (first example → failing test, placement, risk) to ask the developer before writing code. If `engage` is false, proceed directly.",
+  inputSchema: {
+    type: "object",
+    required: ["task"],
+    properties: {
+      task: { type: "string", description: "The developer's request, verbatim" },
+      files: { type: "array", items: { type: "string" }, description: "Files the task is expected to touch, if known" },
+    },
+  },
+  annotations: { readOnlyHint: true },
+  handler: async ({ task, files }) => {
+    let policy;
+    let project: string | undefined;
+    try {
+      const r = repo();
+      policy = r.policy;
+      project = r.project;
+    } catch {
+      /* generic questions */
+    }
+    const s = await client.reflect({ project, task: redact(task, policy).text, files }, policy);
+    sessions.set(s.sessionId, { task, questions: s.questions });
+    if (!s.engage) return text(`No navigator needed (${s.reason ?? "small task"}). Proceed, test first.`, s);
+    return text(
+      [
+        `Ask the developer these questions before writing code (sessionId ${s.sessionId}). Do not answer them yourself:`,
+        ...s.questions.map((q, i) => `${i + 1}. ${q.text}`),
+        "",
+        "Then call copal_brief with the sessionId and their answers (or skipped: true if they decline).",
+      ].join("\n"),
+      s,
+    );
+  },
+});
+
+server.tool({
+  name: "copal_brief",
+  title: "Navigator: turn answers into the agent brief",
+  description: "Send the developer's answers to the copal_reflect questions. Returns the brief to follow: first failing test, location, edge cases, team rules, small steps.",
+  inputSchema: {
+    type: "object",
+    required: ["sessionId"],
+    properties: {
+      sessionId: { type: "string" },
+      answers: { type: "array", items: { type: "object", properties: { id: { type: "string" }, text: { type: "string" } }, required: ["id", "text"] } },
+      skipped: { type: "boolean" },
+    },
+  },
+  handler: async ({ sessionId, answers, skipped }) => {
+    let policy;
+    try {
+      policy = repo().policy;
+    } catch {
+      /* none */
+    }
+    const brief = await client.answer(sessionId, answers ?? [], !!skipped, policy, sessions.get(sessionId));
+    return text(briefToText(brief), brief);
   },
 });
 
@@ -104,7 +171,7 @@ server.tool({
     );
     stats.checks++;
     stats.findings += result.findings.length;
-    return text(stripAnsi(formatReport(result)) + (result.analysisId ? `\n(analysis ${result.analysisId})` : ""), result);
+    return text(stripAnsi(formatReport(result, { showMe: true })) + coachNote(result.findings) + (result.analysisId ? `\n(analysis ${result.analysisId})` : ""), result);
   },
 });
 
@@ -146,10 +213,35 @@ server.tool({
 server.tool({
   name: "copal_report_session",
   title: "Record the agent session",
-  description: "Record a completed agent session (agent name, approximate tokens) for the Copal console cost view. Call once at the end of a task.",
-  inputSchema: { type: "object", properties: { agent: { type: "string" }, tokens: { type: "number" }, summary: { type: "string" } } },
-  handler: async ({ agent, tokens }) => {
-    const body = { agent: agent ?? server.clientInfo?.name ?? "agent", project: repo().project, durationMs: Date.now() - stats.startedAt, tokens, findings: stats.findings };
+  description:
+    "Record a completed agent session for the Copal AI-usage view (tokens and cost per merged change, retries, whether the navigator was used). Call once at the end of a task.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      agent: { type: "string" },
+      tokens: { type: "number" },
+      inputTokens: { type: "number" },
+      outputTokens: { type: "number" },
+      costUsd: { type: "number" },
+      model: { type: "string" },
+      retries: { type: "number", description: "How many times the work had to be redone after test failures or review" },
+      summary: { type: "string" },
+    },
+  },
+  handler: async ({ agent, tokens, inputTokens, outputTokens, costUsd, model, retries }) => {
+    const body = {
+      agent: agent ?? server.clientInfo?.name ?? "agent",
+      project: repo().project,
+      durationMs: Date.now() - stats.startedAt,
+      tokens: tokens ?? (inputTokens ?? 0) + (outputTokens ?? 0),
+      inputTokens,
+      outputTokens,
+      costUsd,
+      model,
+      retries,
+      navigatorUsed: sessions.size > 0,
+      findings: stats.findings,
+    };
     try {
       await client.recordSession(body);
       return text("Session recorded.", body);
@@ -182,11 +274,32 @@ server.prompt({
       role: "user",
       content: {
         type: "text",
-        text: "Call copal_check_staged. For each ENFORCE finding apply the suggested correction (or explain why it is a false positive and add `// copal-ignore <rule-id>`), then call copal_check_staged again until nothing blocks.",
+        text: "Call copal_check_staged. For each finding with a question, ask me the question first and let me decide. Fix ENFORCE findings (or explain why it is a false positive and add `// copal-ignore <rule-id>`), then call copal_check_staged again until nothing blocks.",
       },
     },
   ],
 });
+
+server.prompt({
+  name: "copal-pair",
+  description: "Pair on a feature: Copal navigator questions first, then test-first in small steps",
+  get: () => [
+    {
+      role: "user",
+      content: {
+        type: "text",
+        text: "Let's pair on my next task. Call copal_reflect with it, ask me the questions, wait for my answers, call copal_brief, then work test-first in small steps and show me each step.",
+      },
+    },
+  ],
+});
+
+/** Agents get the questions to relay, so the developer stays the one who decides. */
+function coachNote(findings: { coach?: { question?: string }; ruleId: string }[]): string {
+  const qs = findings.filter((f) => f.coach?.question);
+  if (!qs.length) return "";
+  return "\n\nCoaching: before fixing, relay these questions to the developer (unless they asked you to just fix it):\n" + qs.map((f) => `- [${f.ruleId}] ${f.coach!.question}`).join("\n");
+}
 
 function stripAnsi(s: string) {
   return s.replace(/\x1b\[[0-9;]*m/g, "");

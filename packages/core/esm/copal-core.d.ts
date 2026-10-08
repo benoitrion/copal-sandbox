@@ -1,6 +1,38 @@
-/*! @copal/core 0.1.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
+/*! @copal/core 0.2.0 — Copal rule engine (isomorphic build). https://github.com/benoitrion/copal-sandbox */
 // ---- types
 export type Mode = "audit" | "enforce" | "off";
+/** Policy-wide stance (v4). `coach` (default): hints lead with a question and fixes are only shown on request. */
+export type PolicyMode = "coach" | "audit" | "enforce";
+/** Hint ladder: 0 signal · 1 question · 2 quick reference · 3 worked example · 4 fix ("Show me"). */
+export type HintLevel = 0 | 1 | 2 | 3 | 4;
+/** Coaching content attached to a rule (v4). Everything is optional; a rule without it shows levels 0 and 4 only. */
+export interface Coach {
+    /** Level 1 — one Socratic question that makes the developer think. Must not contain the answer. */
+    question?: string;
+    /** Level 2 — quick reference: a repo path (docs/rules/x.md) or URL with the why, examples and team reasoning. */
+    reference?: string;
+    /** Level 2/3 — short wrong-vs-right example. */
+    example?: {
+        bad?: string;
+        good?: string;
+    };
+    /** Practice for recurring mistakes — URL of a canonical kata (link and credit, never copy CC-BY-SA text). */
+    kata?: string;
+    /** Learning-hour topic suggested to the lead/coach when the rule recurs across a team. */
+    learningHour?: string;
+    /** Occurrences per developer per sprint before Copal suggests the kata (default 3). */
+    escalateAfter?: number;
+}
+/** Navigator mode (v4): a short strong-style pairing session before an AI agent builds a feature. */
+export type NavigatorQuestionKind = "first-example" | "placement" | "risk";
+export interface NavigatorConfig {
+    enabled?: boolean;
+    /** Smallest task that triggers it: "feature" skips small edits, "any" always asks. */
+    minScope?: "feature" | "any";
+    maxQuestions?: number;
+    questions?: NavigatorQuestionKind[];
+}
+/** In v4 files `severity: block` / `severity: audit` are accepted and normalised to mode enforce/audit. */
 export type Severity = "info" | "warning" | "error";
 export type Category = "quality" | "architecture" | "security" | "dependency" | "testing";
 /** One rule of a `.copalrules` file (version 3). Exactly one check kind should be set. */
@@ -22,11 +54,16 @@ export interface Rule {
     /** Regex matched against added lines. */
     pattern?: string;
     flags?: string;
-    /** Concrete correction for `pattern` rules. `with` may use $1 back-references. */
+    /**
+     * Level 4 ("Show me"). For `pattern` rules: `{ replace?, with }` computes a concrete replacement ($1 back-references).
+     * For any rule (v4): a string describing the fix in words.
+     */
     fix?: {
         replace?: string;
         with: string;
-    };
+    } | string;
+    /** Coaching content (v4). */
+    coach?: Coach;
     /** Built-in hard-coded credential detectors (+ policy `redact` patterns). */
     secrets?: boolean;
     /** Dependency policy applied to package.json changes. */
@@ -50,6 +87,10 @@ export interface EnvironmentOverride {
 export interface Policy {
     version: number;
     project?: string;
+    /** v4: coach (default) | audit | enforce. */
+    mode?: PolicyMode;
+    /** v4: navigator mode configuration. */
+    navigator?: NavigatorConfig;
     extends?: string[];
     rules: Rule[];
     redact?: RedactPattern[];
@@ -84,10 +125,16 @@ export interface Finding {
     message: string;
     why?: string;
     suggestion?: Suggestion;
+    /** Level-4 fix described in words (v4 string `fix`). */
+    fixText?: string;
     sources?: string[];
+    /** Coaching content copied from the rule (v4). */
+    coach?: Coach;
 }
 export interface Report {
     environment: string;
+    /** Policy stance the report was produced under (v4). */
+    policyMode?: PolicyMode;
     findings: Finding[];
     blocking: boolean;
     summary: {
@@ -135,6 +182,7 @@ export declare function basename(p: string): string;
 
 // ---- policy
 export declare const POLICY_FILE = ".copalrules";
+export declare const SUPPORTED_VERSIONS: number[];
 /** Built-in rule packs, referenced with `extends: [builtin:security]`. */
 export declare const BUILTIN_PACKS: Record<string, Policy>;
 export declare const BUILTIN_REDACT: RedactPattern[];
@@ -200,11 +248,20 @@ export declare const green: (s: string) => string;
 export declare const dim: (s: string) => string;
 export declare const bold: (s: string) => string;
 export declare const cyan: (s: string) => string;
-export declare function formatFinding(f: Finding): string;
-export declare function formatReport(r: Report): string;
+export interface FormatOptions {
+    /** Reveal level 4 (the fix). Default: only when the report is not in coach mode. */
+    showMe?: boolean;
+    /** Reveal levels 2–3 (why, reference, example). Default true. */
+    explain?: boolean;
+}
+export declare function formatFinding(f: Finding, opts?: FormatOptions): string;
+export declare function formatReport(r: Report, opts?: FormatOptions): string;
 /** Markdown body for a PR/MR summary comment. */
 export declare function reportToMarkdown(r: Report, title?: string): string;
-/** Markdown body for one inline review comment. */
+/**
+ * Markdown body for one inline review comment — a hint card: question first, explanation folded,
+ * fix ("Show me") folded and never as a one-click suggestion when the rule has coaching.
+ */
 export declare function findingToMarkdown(f: Finding): string;
 /** Rules rendered as agent guidance (MCP). */
 export declare function rulesToGuidance(rules: Rule[], filePath?: string): string;

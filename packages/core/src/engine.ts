@@ -48,6 +48,7 @@ export function evaluate(changes: FileChange[], policy: Policy, opts: EvaluateOp
   const blocking = findings.filter((f) => f.blocking).length;
   return {
     environment,
+    policyMode: policy.mode ?? (policy.version >= 4 ? "coach" : "audit"),
     findings,
     blocking: blocking > 0,
     summary: { total: findings.length, blocking, audit: findings.length - blocking, byCategory },
@@ -69,6 +70,8 @@ function base(rule: Rule, file: string, line: number, message: string, cat: Cate
     message: rule.message ?? message,
     why: rule.why,
     sources: rule.sources,
+    ...(rule.coach ? { coach: rule.coach } : {}),
+    ...(typeof rule.fix === "string" ? { fixText: rule.fix } : {}),
   };
 }
 
@@ -126,7 +129,7 @@ function checkPattern(rule: Rule, file: FileChange): Finding[] {
     const f = base(rule, file.path, line, `Matches forbidden pattern of rule ${rule.id}`, "quality", "warning");
     f.column = m.index + 1;
     f.endColumn = m.index + m[0].length + 1;
-    if (rule.fix) {
+    if (rule.fix && typeof rule.fix === "object") {
       const fixRx = new RegExp(rule.fix.replace ?? rule.pattern!, flags);
       const replacement = text.replace(fixRx, rule.fix.with);
       if (replacement !== text) f.suggestion = { original: text, replacement };
