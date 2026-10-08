@@ -18,6 +18,8 @@ permissions:
 jobs:
   api-test:
     runs-on: ubuntu-latest
+    # COPAL_TEST_API_KEY lives in the "Test" environment (environment secrets are only visible to jobs that declare it)
+    environment: Test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,7 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          [ -f report.md ] || echo "## ❌ api-test did not produce a report (server unreachable?)" > report.md
+          [ -f report.md ] || echo "## ❌ api-test did not produce a report (no key for the target server, or server unreachable: see the run)" > report.md
           echo "" >> report.md; echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           N=$(gh issue list --state open --label api-test --json number --jq '.[0].number')
