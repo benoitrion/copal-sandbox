@@ -43,6 +43,29 @@ KEEP=1 npm run e2e   # idem, puis laisse tourner les serveurs → http://localho
 
 Node ≥ 20 et git sont requis.
 
+## Héberger le backend (et billing-api)
+
+Le backend simulé tourne dans **un seul processus, sur un seul port**. Il regroupe l'API `/v1/*`, la console, le faux GitHub/GitLab et les webhooks de PR (`/webhooks/github`, `/webhooks/gitlab`).
+
+- **GitHub Codespaces** : [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/benoitrion/copal-sandbox)
+  - `scripts/serve-hosted.sh` démarre le backend sur `:4010` et l'app cible billing-api sur `:3000`, puis tente de rendre ces ports publics.
+  - L'URL et la clé API s'affichent dans le terminal (clé aussi dans `.data/dev-key`).
+  - Le codespace s'arrête après 30 min d'inactivité ; il suffit de le relancer.
+- **Render** (URL permanente, offre gratuite) : [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/benoitrion/copal-sandbox)
+  - La clé `COPAL_MOCK_DEV_KEY` est générée automatiquement ; vous la trouvez dans *Environment*.
+- **Docker** : `docker build -t copal-mock . && docker run -p 4010:4010 -e COPAL_MOCK_DEV_KEY=… copal-mock`
+
+Dès que `COPAL_MOCK_DEV_KEY` est défini, la clé par défaut `copal_dev_local` cesse d'être acceptée, et la console comme la création de clés exigent la clé.
+
+Par défaut, les webhooks de PR publient sur le faux GitHub/GitLab du serveur. Pour publier sur de vraies PR, définissez `COPAL_GIT_TARGET=real` avec `GITHUB_TOKEN` (ou `GITHUB_APP_ID` + `GITHUB_PRIVATE_KEY`), `GITHUB_WEBHOOK_SECRET`, `GITLAB_TOKEN`.
+
+**billing-api** est maintenant un vrai service HTTP (`cd examples/billing-api && npm install && npm start`) :
+- `GET /health`
+- `GET /customers/:id/invoices`
+- `POST /invoices/preview`
+
+**Lovable** : le prompt d'alignement est dans [`docs/lovable-alignment-prompt.md`](docs/lovable-alignment-prompt.md).
+
 ## Ce que montre `npm run e2e`
 
 1. Démarre le backend simulé (`:4010`) et l'app Git (`:4020`), copie `billing-api` dans un repo git temporaire.

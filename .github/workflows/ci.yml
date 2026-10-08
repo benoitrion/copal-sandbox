@@ -37,3 +37,17 @@ jobs:
         with:
           name: copal-jetbrains-plugin
           path: plugins/jetbrains/build/distributions/*.zip
+
+  docker:
+    name: Hosted backend (Docker image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t copal-mock .
+      - name: Smoke test
+        run: |
+          docker run -d --name copal -p 4010:4010 -e COPAL_MOCK_DEV_KEY=ci-key copal-mock
+          for i in $(seq 1 30); do curl -sf localhost:4010/healthz && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:4010/v1/status)" = 401
+          curl -sf localhost:4010/v1/status -H 'x-api-key: ci-key' | grep -q billing-api
+          docker logs copal

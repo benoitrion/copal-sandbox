@@ -1,0 +1,29 @@
+{
+  "name": "Copal sandbox",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "forwardPorts": [
+    4010,
+    3000
+  ],
+  "portsAttributes": {
+    "4010": {
+      "label": "Copal mock backend",
+      "onAutoForward": "notify"
+    },
+    "3000": {
+      "label": "billing-api (target app)",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "npm install --no-audit --no-fund && npm run build && npm install --prefix examples/billing-api --no-audit --no-fund",
+  "postStartCommand": "bash scripts/serve-hosted.sh",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "README.md",
+        "examples/billing-api/.copalrules",
+        "examples/billing-api/src/invoice/total.ts"
+      ]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# One-click deploy: https://render.com/deploy?repo=https://github.com/benoitrion/copal-sandbox
+services:
+  - type: web
+    name: copal-mock
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: COPAL_MOCK_DEV_KEY
+        generateValue: true
+      - key: GITHUB_WEBHOOK_SECRET
+        generateValue: true
+      - key: GITLAB_WEBHOOK_SECRET
+        generateValue: true

@@ -50,7 +50,9 @@ function md(src){const L=src.split("\\n"),o=[];for(let i=0;i<L.length;i++){const
  if(l.startsWith("|")){const rows=[];while(i<L.length&&L[i].startsWith("|")){if(!/^\\|[-| ]+\\|$/.test(L[i]))rows.push(L[i].slice(1,-1).split(/(?<!\\\\)\\|/));i++}i--;o.push("<table>"+rows.map((r,j)=>"<tr>"+r.map(c=>(j?"<td>":"<th>")+inl(c.trim().replace(/\\\\\\|/g,"|"))+(j?"</td>":"</th>")).join("")+"</tr>").join("")+"</table>");continue}
  if(l.startsWith("### "))o.push("<h3>"+inl(l.slice(4))+"</h3>");else if(l.startsWith("> "))o.push("<blockquote>"+inl(l.slice(2))+"</blockquote>");else if(l.trim())o.push("<p>"+inl(l)+"</p>")}return o.join("")}
 const TABS=[["analyses","Analyses"],["pulls","Pull requests"],["drift","Drift & evidence"],["policy","Policy"]];
-async function load(){try{S=await (await fetch("/console/api/state")).json();$("#upd").textContent="maj "+new Date().toLocaleTimeString();render()}catch(e){$("#upd").textContent="hors ligne"}}
+function key(){try{return localStorage.getItem("copalKey")||""}catch(e){return ""}}
+async function api(p,o={}){const r=await fetch(p,{...o,headers:{"x-api-key":key()}});if(r.status===401){const k=prompt("Copal API key for this console:");if(k){try{localStorage.setItem("copalKey",k)}catch(e){}return api(p,o)}throw new Error("unauthorized")}return r}
+async function load(){try{S=await (await api("/console/api/state")).json();$("#upd").textContent="maj "+new Date().toLocaleTimeString();render()}catch(e){$("#upd").textContent="hors ligne"}}
 function kpis(){const m=S.metrics,blocking=S.analyses.reduce((n,a)=>n+a.summary.blocking,0);
  const k=[[m.analyses,"analyses"],[m.governedChanges,"governed changes (PR)"],[m.gates.passed+" / "+(m.gates.passed+m.gates.failed),"PR gates passés"],[blocking,"findings bloquants"],[Object.entries(m.bySource).map(([s,n])=>s+" "+n).join(" · ")||"—","par point d'application"]];
  $("#kpis").innerHTML=k.map(([v,l],i)=>'<div class="kpi"><b'+(i===4?' class="sm"':'')+'>'+esc(v)+'</b><span>'+esc(l)+'</span></div>').join("")}
@@ -74,7 +76,7 @@ function drift(){const d=S.metrics.drift;const max=Math.max(1,...d.map(x=>x.coun
  +'<div class="card"><h2>Sessions agents</h2>'+(S.sessions.length?S.sessions.slice().reverse().map(s=>'<div class="row"><div class="t"><div><b>'+esc(s.agent)+'</b> '+esc(s.project||"")+'</div><small>'+new Date(s.at).toLocaleTimeString()+(s.tokens?' · '+s.tokens+' tokens':'')+(s.findings!=null?' · '+s.findings+' finding(s)':'')+'</small></div></div>').join(""):'<div class="empty">Aucune session MCP enregistrée.</div>')+'</div></div>'}
 function policy(){return S.projects.map(p=>'<div class="card" style="margin-bottom:14px"><h2>'+esc(p.name)+' · v'+p.version+' · '+p.rules.length+' règles effectives</h2>'+p.rules.map(r=>'<div class="finding"><span class="pill '+(r.mode==="enforce"?"bad":"warn")+'">'+esc(r.mode||"audit")+'</span> <b>'+esc(r.id)+'</b> <span class="src">'+esc(r.category||"")+'</span><div class="why">'+esc(r.why||r.message||r.deny||"")+'</div></div>').join("")+'<pre style="margin:0;border-radius:0">'+esc(p.yaml)+'</pre></div>').join("")||'<div class="card"><div class="empty">Aucun projet.</div></div>'}
 function render(){if(!S)return;kpis();tabs();$("#view").innerHTML=({analyses,pulls,drift,policy})[tab]();document.querySelectorAll(".row[data-id]").forEach(r=>r.onclick=()=>{sel=r.dataset.id;render()})}
-$("#reset").onclick=async()=>{if(confirm("Effacer analyses, PR et sessions ?")){await fetch("/console/api/reset",{method:"POST"});sel=null;load()}};
+$("#reset").onclick=async()=>{if(confirm("Effacer analyses, PR et sessions ?")){await api("/console/api/reset",{method:"POST"});sel=null;load()}};
 load();setInterval(load,3000);
 </script>
 </body>

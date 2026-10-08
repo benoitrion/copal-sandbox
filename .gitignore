@@ -3,3 +3,4 @@ dist/
 *.tsbuildinfo
 *.vsix
 apps/mock-server/data/
+.data/

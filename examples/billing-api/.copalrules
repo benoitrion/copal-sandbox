@@ -36,7 +36,7 @@ rules:
     category: dependency
     mode: enforce
     dependencies:
-      allow: ["@billing/*", "zod", "pino", "fastify", "decimal.js", "typescript", "@types/*", "vitest"]
+      allow: ["@billing/*", "zod", "pino", "fastify", "decimal.js", "typescript", "@types/*", "vitest", "tsx"]
       deny: [moment, left-pad, request]
     why: "New packages need a security and licence review (#platform-deps)."
 

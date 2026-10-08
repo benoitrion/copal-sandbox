@@ -24,7 +24,8 @@ import {
   fileAsChange,
 } from "@copal/core";
 import { Ctx, HttpError, Router } from "./http";
-import { DEV_KEY, Store } from "./store";
+import { DEV_KEY, HARDENED, Store } from "./store";
+import { mountWebhooks } from "./webhooks";
 import { registerFakeGit } from "./fake-git";
 import { consoleHtml } from "./console";
 
@@ -33,7 +34,7 @@ function arg(name: string, def?: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : process.env[`COPAL_MOCK_${name.toUpperCase()}`] ?? def;
 }
 
-const port = Number(arg("port", "4010"));
+const port = Number(arg("port", process.env.PORT ?? "4010"));
 const store = new Store(arg("persist"));
 const router = new Router();
 
@@ -59,11 +60,16 @@ for (const dir of (arg("project", path.resolve(__dirname, "../../../../examples/
   }
 }
 
+/**
+ * /v1/* needs a device key. When hardened (custom COPAL_MOCK_DEV_KEY or COPAL_MOCK_PROTECT=1, i.e. the mock is
+ * reachable from the internet), minting keys and the console data API need a key too.
+ */
 const auth = (ctx: Ctx) => {
   const p = new URL(ctx.req.url ?? "/", "http://x").pathname;
-  if (!p.startsWith("/v1/") || p === "/v1/keys") return;
+  const needsKey = (p.startsWith("/v1/") && (p !== "/v1/keys" || HARDENED)) || (HARDENED && p.startsWith("/console/api/"));
+  if (!needsKey) return;
   const key = (ctx.req.headers["x-api-key"] as string) ?? ctx.query.get("key") ?? undefined;
-  if (!store.validKey(key)) throw new HttpError(401, "missing or invalid x-api-key (dev key: copal_dev_local)");
+  if (!store.validKey(key)) throw new HttpError(401, HARDENED ? "missing or invalid x-api-key" : "missing or invalid x-api-key (dev key: copal_dev_local)");
 };
 
 function projectOr404(name: string) {
@@ -201,8 +207,10 @@ router.post("/console/api/reset", () => {
   return { ok: true };
 });
 router.get("/", () => consoleHtml());
+router.get("/healthz", () => ({ ok: true, projects: Object.keys(store.state.projects).length }));
 
 registerFakeGit(router, store);
+const webhooks = mountWebhooks(router, port, DEV_KEY);
 
 const server = http.createServer((req, res) => {
   if (req.method === "OPTIONS") {
@@ -214,7 +222,8 @@ const server = http.createServer((req, res) => {
 server.listen(port, () => {
   console.log(`Copal mock server on http://localhost:${port}`);
   console.log(`  console      http://localhost:${port}/`);
-  console.log(`  api key      ${DEV_KEY}`);
+  console.log(`  api key      ${HARDENED ? "(COPAL_MOCK_DEV_KEY)" : DEV_KEY}`);
   console.log(`  fake GitHub  http://localhost:${port}/github`);
   console.log(`  fake GitLab  http://localhost:${port}/gitlab/api/v4`);
+  console.log(`  webhooks     ${webhooks}`);
 });

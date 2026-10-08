@@ -48,7 +48,10 @@ export interface State {
   pulls: FakePull[];
 }
 
-export const DEV_KEY = "copal_dev_local";
+export const DEFAULT_DEV_KEY = "copal_dev_local";
+/** Seed key. Override with COPAL_MOCK_DEV_KEY when the mock is reachable from the internet. */
+export const DEV_KEY = process.env.COPAL_MOCK_DEV_KEY || DEFAULT_DEV_KEY;
+export const HARDENED = DEV_KEY !== DEFAULT_DEV_KEY || process.env.COPAL_MOCK_PROTECT === "1";
 
 export class Store {
   state: State = {
@@ -65,6 +68,7 @@ export class Store {
     if (file && fs.existsSync(file)) {
       this.state = { ...this.state, ...JSON.parse(fs.readFileSync(file, "utf8")) };
     }
+    if (!this.state.keys.some((k) => k.key === DEV_KEY)) this.state.keys.push({ key: DEV_KEY, name: "seed dev key", createdAt: new Date().toISOString() });
   }
 
   save() {

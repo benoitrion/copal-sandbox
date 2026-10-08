@@ -70,7 +70,7 @@ export class Router {
         if (typeof out === "string") {
           res.writeHead(200, { "content-type": out.startsWith("<!doctype") ? "text/html; charset=utf-8" : "text/plain; charset=utf-8" });
           res.end(out);
-        } else send(res, 200, out ?? { ok: true });
+        } else send(res, res.statusCode || 200, out ?? { ok: true });
         return;
       }
       throw new HttpError(404, `no route for ${req.method} ${url.pathname}`);
