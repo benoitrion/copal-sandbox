@@ -146,6 +146,82 @@ export const BUILTIN_PACKS: Record<string, Policy> = {
       },
     ],
   },
+  smells: {
+    version: 4,
+    rules: [
+      {
+        id: "long-function",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "long-function", max: 40 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/test/**"],
+        why: "Long functions hide several responsibilities; each extra one is a reason to change and a place for bugs.",
+        coach: {
+          question: "How would you name the steps this code goes through — could each step stand on its own?",
+          reference: "https://refactoring.guru/smells/long-method",
+          kata: `${SAMMAN}/gilded_rose.html`,
+          learningHour: "extract-function",
+        },
+        fix: "Extract the steps into well-named functions; keep this one as the readable summary.",
+      },
+      {
+        id: "deep-nesting",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "deep-nesting", max: 3 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        why: "Every nested level is a condition the reader must hold in their head.",
+        coach: {
+          question: "Which condition could exit first, so the main path reads straight down?",
+          reference: "https://refactoring.guru/replace-nested-conditional-with-guard-clauses",
+          kata: `${SAMMAN}/gilded_rose.html`,
+          learningHour: "guard-clauses",
+        },
+        fix: "Invert the outer conditions into guard clauses, or extract the inner block into a function.",
+      },
+      {
+        id: "too-many-params",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "too-many-params", max: 4 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        why: "Many parameters usually mean a missing concept, and make call sites easy to get wrong.",
+        coach: {
+          question: "Which of these parameters always travel together — what would you call that thing?",
+          reference: "https://refactoring.guru/smells/long-parameter-list",
+          kata: `${SAMMAN}/theatrical_players.html`,
+          learningHour: "naming-domain-concepts",
+        },
+        fix: "Introduce a parameter object (or value object) for the values that travel together.",
+      },
+      {
+        id: "large-file",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "large-file", max: 400 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/generated/**"],
+        why: "Large files tend to collect unrelated responsibilities and attract merge conflicts.",
+        coach: { question: "If you had to split this file in two, where would the seam be?", reference: "https://refactoring.guru/smells/large-class" },
+      },
+      {
+        id: "duplicated-literal",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "duplicated-literal", max: 3 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*"],
+        why: "The same text in several places drifts apart the day one copy changes.",
+        coach: { question: "What does this value mean in the domain, and where should it live once?", reference: "https://refactoring.guru/replace-magic-number-with-symbolic-constant" },
+      },
+    ],
+  },
   "clean-code": {
     version: 4,
     rules: [
@@ -197,7 +273,8 @@ export interface ValidationIssue {
   message: string;
 }
 
-const KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest"] as const;
+const KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell"] as const;
+const SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal"];
 
 export function validatePolicy(p: Policy): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -218,6 +295,8 @@ export function validatePolicy(p: Policy): ValidationIssue[] {
     if (kinds.length !== 1) issues.push({ ruleId: r.id, message: `expected exactly one of ${KINDS.join(", ")}; got ${kinds.join(", ") || "none"}` });
     if (r.mode && !["audit", "enforce", "off"].includes(r.mode)) issues.push({ ruleId: r.id, message: `invalid mode "${r.mode}"` });
     if (r.deny && !/\s->\s/.test(r.deny)) issues.push({ ruleId: r.id, message: 'deny must look like "from/** -> to/**"' });
+    if (r.smell && !SMELL_KINDS.includes(r.smell.kind)) issues.push({ ruleId: r.id, message: `unknown smell "${r.smell.kind}" (${SMELL_KINDS.join(", ")})` });
+    if (r.smell?.max !== undefined && !(Number(r.smell.max) >= 1)) issues.push({ ruleId: r.id, message: "smell.max must be ≥ 1" });
     if (r.coach?.question && containsCode(r.coach.question)) issues.push({ ruleId: r.id, message: "coach.question must not contain code — ask, don't answer" });
     if (r.coach?.escalateAfter !== undefined && !(r.coach.escalateAfter >= 1)) issues.push({ ruleId: r.id, message: "coach.escalateAfter must be ≥ 1" });
     if (r.pattern) {

@@ -54,7 +54,7 @@ export interface CoachEvent {
   ruleId: string;
   category?: string;
   levelReached: HintLevel;
-  action: "shown" | "ask" | "explain" | "show_me" | "skipped" | "answered";
+  action: "shown" | "ask" | "explain" | "show_me" | "skipped" | "answered" | "false_positive";
   source: "ide" | "cli" | "agent" | "pr";
   at?: string;
 }

@@ -136,6 +136,26 @@ export class GitHubProvider implements GitProvider {
     });
   }
 
+  async readFile(p: string, ref = "HEAD"): Promise<string | undefined> {
+    try {
+      const pr = ref === "HEAD" ? ((await (await http(this.api(`/pulls/${this.number}`), { headers: await this.h() })).json()) as any) : undefined;
+      const sha = pr?.head?.sha ?? ref;
+      const r = (await (await http(this.api(`/contents/${encodeURI(p)}?ref=${sha}`), { headers: await this.h() })).json()) as any;
+      return Buffer.from(r.content, "base64").toString("utf8");
+    } catch {
+      return undefined;
+    }
+  }
+
+  async reviewComment(id: number): Promise<{ body: string; path?: string; html_url?: string }> {
+    return (await (await http(this.api(`/pulls/comments/${id}`), { headers: await this.h() })).json()) as any;
+  }
+
+  /** Reply inside a review thread (falls back to a PR comment when the thread can't be replied to). */
+  async replyInThread(commentId: number, body: string) {
+    await http(this.api(`/pulls/${this.number}/comments/${commentId}/replies`), { method: "POST", headers: await this.h(), body: JSON.stringify({ body }) });
+  }
+
   async comment(body: string) {
     await http(this.api(`/issues/${this.number}/comments`), { method: "POST", headers: await this.h(), body: JSON.stringify({ body }) });
   }
@@ -197,6 +217,20 @@ export class GitLabProvider implements GitProvider {
       headers: this.h(),
       body: JSON.stringify({ state: glState, name: process.env.COPAL_STATUS_CONTEXT ?? "copal/check", description: description.slice(0, 140), target_url: process.env.COPAL_CONSOLE_URL }),
     });
+  }
+
+  async readFile(p: string): Promise<string | undefined> {
+    try {
+      const mr = (await (await http(this.api(`/merge_requests/${this.iid}`), { headers: this.h() })).json()) as any;
+      return await (await http(this.api(`/repository/files/${encodeURIComponent(p)}/raw?ref=${mr.sha}`), { headers: this.h(), accept: "text/plain" })).text();
+    } catch {
+      return undefined;
+    }
+  }
+
+  async discussionStart(discussionId: string): Promise<{ id: number; body: string; position?: { new_path?: string } }> {
+    const d = (await (await http(this.api(`/merge_requests/${this.iid}/discussions/${discussionId}`), { headers: this.h() })).json()) as any;
+    return d.notes[0];
   }
 
   async postReview(_sha: string, report: Report, findings: Finding[]) {

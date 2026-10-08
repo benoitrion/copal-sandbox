@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import { CopalClient } from "@copal/client";
 import { reportToMarkdown } from "@copal/core";
 import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider } from "./providers";
+import { COMMAND_RX, runCommand } from "./commands";
 
 const lastAnalysis = new Map<string, string>(); // PR label -> analysisId (for /copal feedback)
 
@@ -85,6 +86,29 @@ async function handleFeedback(provider: GitProvider, body: string, client = new 
   return true;
 }
 
+/** `/copal help|explain|rule` in a PR conversation or review thread (GitHub App webhook or Actions event). */
+export async function handleGitHubCommand(p: GitHubProvider, payload: any, client = new CopalClient()): Promise<boolean> {
+  const c = payload.comment ?? {};
+  if (!COMMAND_RX.test(c.body ?? "")) return false;
+  const parent = c.in_reply_to_id ? await p.reviewComment(c.in_reply_to_id).catch(() => undefined) : undefined;
+  const reply = await runCommand(
+    {
+      body: c.body,
+      author: c.user?.login,
+      url: c.html_url,
+      path: c.path,
+      parent: parent ? { body: parent.body, path: parent.path, url: parent.html_url } : undefined,
+      loadPolicy: () => p.readFile(".copalrules"),
+      referenceBase: payload.repository?.html_url ? `${payload.repository.html_url}/blob/${payload.pull_request?.head?.sha ?? "HEAD"}/` : undefined,
+    },
+    client,
+  );
+  if (!reply) return false;
+  if (c.in_reply_to_id || payload.pull_request) await p.replyInThread(c.in_reply_to_id ?? c.id, reply).catch(() => p.comment(reply));
+  else await p.comment(reply);
+  return true;
+}
+
 export interface WebhookInput {
   provider: "github" | "gitlab";
   event: string;
@@ -102,9 +126,11 @@ export async function handleWebhook({ provider, event, payload }: WebhookInput, 
       await runCheck(new GitHubProvider(githubConfigFromEnv(), repo, payload.pull_request.number, installation), client);
       return `checked ${repo}#${payload.pull_request.number}`;
     }
-    if (event === "issue_comment" && payload.action === "created" && payload.issue?.pull_request) {
-      const p = new GitHubProvider(githubConfigFromEnv(), repo, payload.issue.number, installation);
-      return (await handleFeedback(p, payload.comment?.body, client)) ? "feedback recorded" : "ignored comment";
+    if ((event === "issue_comment" && payload.action === "created" && payload.issue?.pull_request) || (event === "pull_request_review_comment" && payload.action === "created")) {
+      const number = payload.issue?.number ?? payload.pull_request?.number;
+      const p = new GitHubProvider(githubConfigFromEnv(), repo, number, installation);
+      if (await handleFeedback(p, payload.comment?.body, client)) return "feedback recorded";
+      return (await handleGitHubCommand(p, payload, client)) ? "command answered" : "ignored comment";
     }
     return `ignored ${event}/${payload.action ?? ""}`;
   }
@@ -119,7 +145,23 @@ export async function handleWebhook({ provider, event, payload }: WebhookInput, 
   }
   if (event === "Note Hook" && payload.merge_request) {
     const p = new GitLabProvider(gitlabConfigFromEnv(), project, payload.merge_request.iid);
-    return (await handleFeedback(p, payload.object_attributes?.note, client)) ? "feedback recorded" : "ignored note";
+    if (await handleFeedback(p, payload.object_attributes?.note, client)) return "feedback recorded";
+    const note = payload.object_attributes ?? {};
+    if (!COMMAND_RX.test(note.note ?? "")) return "ignored note";
+    const parent = note.discussion_id ? await p.discussionStart(note.discussion_id).catch(() => undefined) : undefined;
+    const reply = await runCommand(
+      {
+        body: note.note,
+        author: payload.user?.username,
+        url: note.url,
+        path: note.position?.new_path,
+        parent: parent && parent.id !== note.id ? { body: parent.body, path: parent.position?.new_path, url: note.url } : undefined,
+        loadPolicy: () => p.readFile(".copalrules"),
+      },
+      client,
+    );
+    if (reply) await p.comment(reply);
+    return reply ? "command answered" : "ignored note";
   }
   return `ignored ${event}`;
 }

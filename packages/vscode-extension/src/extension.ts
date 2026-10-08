@@ -2,6 +2,9 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import * as fs from "node:fs";
 import {
+  agentContextBlock,
+  AGENT_CONTEXT_TARGETS,
+  mergeManagedBlock,
   applicableRules,
   briefToText,
   buildBrief,
@@ -215,6 +218,25 @@ async function pair() {
 
 const rootOf = new Map<string, string>();
 
+/** Write the team's rules into CLAUDE.md, AGENTS.md, Cursor and Copilot instruction files (managed block). */
+async function syncAgentFiles() {
+  const d = vscode.window.activeTextEditor?.document ?? vscode.workspace.textDocuments.find((x) => policyFor(x));
+  const p = d ? policyFor(d) : null;
+  if (!p) return vscode.window.showWarningMessage("Copal: open a file under a .copalrules first.");
+  const block = agentContextBlock(p.policy, p.policy.project);
+  const changed: string[] = [];
+  for (const t of Object.values(AGENT_CONTEXT_TARGETS)) {
+    const file = path.join(p.root, t.file);
+    const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    const next = mergeManagedBlock(current, block, t.header);
+    if (next === current) continue;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, next);
+    changed.push(t.file);
+  }
+  vscode.window.showInformationMessage(changed.length ? `Copal: updated ${changed.join(", ")} — commit them so every AI assistant gets your rules.` : "Copal: agent instruction files are up to date.");
+}
+
 class QuickFixes implements vscode.CodeActionProvider {
   static kinds = [vscode.CodeActionKind.QuickFix];
   provideCodeActions(doc: vscode.TextDocument, _range: vscode.Range, ctx: vscode.CodeActionContext): vscode.CodeAction[] {
@@ -258,6 +280,7 @@ class QuickFixes implements vscode.CodeActionProvider {
       const indent = lineText.slice(0, lineText.length - lineText.trimStart().length);
       const comment = /\.(py|ya?ml|sh)$/.test(doc.fileName) ? "#" : "//";
       ignore.edit.insert(doc.uri, new vscode.Position(f.line - 1, 0), `${indent}${comment} copal-ignore ${f.ruleId}\n`);
+      ignore.command = { title: "record", command: "copal.recordFalsePositive", arguments: [ref] };
       ignore.diagnostics = [d];
       actions.push(ignore);
     }
@@ -303,6 +326,11 @@ export function activate(ctx: vscode.ExtensionContext) {
       if (f) void coachEvent(f, 4, "show_me", ref.uri);
     }),
     vscode.commands.registerCommand("copal.pair", pair),
+    vscode.commands.registerCommand("copal.syncAgentFiles", syncAgentFiles),
+    vscode.commands.registerCommand("copal.recordFalsePositive", (ref: FindingRef) => {
+      const f = findingFor(ref);
+      if (f) void coachEvent(f, 0, "false_positive", ref.uri);
+    }),
     vscode.workspace.onDidOpenTextDocument(check),
     vscode.workspace.onDidSaveTextDocument((d) => {
       if (path.basename(d.fileName) === ".copalrules") vscode.workspace.textDocuments.forEach(check);

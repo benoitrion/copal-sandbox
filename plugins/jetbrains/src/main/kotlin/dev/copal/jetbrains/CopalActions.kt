@@ -100,3 +100,23 @@ class OpenConsoleAction : CopalAction() {
         BrowserUtil.browse(CopalSettings.get().state.serverUrl)
     }
 }
+
+/** Tools → Copal.dev → Sync Agent Instruction Files: CLAUDE.md, AGENTS.md, Cursor and Copilot get the team's rules. */
+class SyncAgentFilesAction : CopalAction() {
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.project?.basePath != null
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val dir = e.getData(CommonDataKeys.VIRTUAL_FILE)?.let { CopalRunner.findPolicyDir(it)?.path } ?: project.basePath ?: return
+        object : Task.Backgroundable(project, "Copal: syncing agent instruction files", false) {
+            override fun run(indicator: ProgressIndicator) {
+                val out = CopalRunner.run(CopalRunner.command(dir, "sync-context"))
+                val text = stripAnsi(out.stdout + out.stderr).trim()
+                CopalNotifier.notify(project, if (out.exitCode == 0) "Copal: agent instruction files synced — commit them." else "Copal: sync failed", if (out.exitCode == 0) NotificationType.INFORMATION else NotificationType.WARNING, details = text)
+                com.intellij.openapi.vfs.VfsUtil.markDirtyAndRefresh(true, true, true, java.io.File(dir))
+            }
+        }.queue()
+    }
+}

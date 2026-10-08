@@ -483,7 +483,82 @@ function ruleSummary(r) {
   if (r.secrets) return "no hard-coded credentials";
   if (r.dependencies) return `dependencies allowed: ${r.dependencies.allow?.join(", ") || "any"}`;
   if (r.requireTest) return `changes need a test matching ${r.requireTest.test}`;
+  if (r.smell) return `avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}`;
   return r.message ?? r.why ?? `avoid /${r.pattern}/`;
+}
+function draftRuleFromReview(input) {
+  const text = input.text.replace(/^\s*\/copal\s+rule\b[:\s]*/i, "").replace(/\s+/g, " ").trim();
+  const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
+  const id = (words.slice(0, 4).join("-") || "review-rule").slice(0, 48);
+  const dir = input.path && input.path.includes("/") ? input.path.slice(0, input.path.lastIndexOf("/")) : void 0;
+  const sentence = text.replace(/[.!]+$/, "");
+  const question = /\?\s*$/.test(text) ? text : `Before you write this: ${sentence.charAt(0).toLowerCase() + sentence.slice(1)} \u2014 how does your change handle that?`;
+  const rule = {
+    id,
+    category: "quality",
+    mode: "audit",
+    ...dir ? { paths: [`${dir}/**`] } : {},
+    why: text,
+    sources: [input.source ?? "review comment", ...input.author ? [`@${input.author}`] : []],
+    coach: { question: containsCode(question) ? "What should the author check here before asking for review?" : question, ...input.source ? { reference: input.source } : {} }
+  };
+  const yaml = [
+    "# Draft from a review comment \u2014 finish and add under `rules:` in .copalrules",
+    "# Add ONE check if it can be detected (pattern / deny / smell / requireTest),",
+    "# or keep it coaching-only: agents still receive it through `copal sync-context`.",
+    `- id: ${rule.id}`,
+    `  category: quality`,
+    `  mode: audit`,
+    ...dir ? [`  paths: ["${dir}/**"]`] : [],
+    `  # pattern: "\u2026"            # e.g. a regex on added lines`,
+    `  why: ${JSON.stringify(text)}`,
+    `  sources: [${rule.sources.map((s) => JSON.stringify(s)).join(", ")}]`,
+    `  coach:`,
+    `    question: ${JSON.stringify(rule.coach.question)}`,
+    ...input.source ? [`    reference: ${input.source}`] : [`    # reference: docs/rules/${rule.id}.md`],
+    `    # kata: https://sammancoaching.org/kata_descriptions/\u2026`
+  ].join("\n");
+  return { rule, yaml };
+}
+var STOP = /* @__PURE__ */ new Set(["the", "and", "for", "you", "this", "that", "with", "should", "please", "don", "dont", "not", "are", "use", "here", "have", "from", "into", "our", "we", "always", "never", "must", "avoid", "instead", "copal", "rule"]);
+var AGENT_CONTEXT_TARGETS = {
+  claude: { file: "CLAUDE.md" },
+  agents: { file: "AGENTS.md" },
+  cursor: { file: ".cursor/rules/copal.mdc", header: "---\ndescription: Team engineering rules from .copalrules (managed by Copal)\nalwaysApply: true\n---\n" },
+  copilot: { file: ".github/copilot-instructions.md" }
+};
+var CONTEXT_BEGIN = "<!-- copal:begin (generated from .copalrules \u2014 edit the rules, not this block) -->";
+var CONTEXT_END = "<!-- copal:end -->";
+function agentContextBlock(policy, project) {
+  const rules = policy.rules.filter((r) => r.mode !== "off");
+  const lines = [CONTEXT_BEGIN, `## Team engineering rules${project ? ` (${project})` : ""}`, ""];
+  lines.push("Follow these rules when writing code in this repository. ENFORCED rules block the commit and the PR check.", "");
+  for (const r of rules) {
+    lines.push(`- **${r.id}**${r.mode === "enforce" ? " (ENFORCED)" : ""}: ${ruleSummary(r)}.${r.why && r.why !== ruleSummary(r) ? ` ${r.why}` : ""}${r.coach?.reference ? ` See ${r.coach.reference}.` : ""}`);
+  }
+  const qs = rules.filter((r) => r.coach?.question);
+  if (qs.length) {
+    lines.push("", "### Ask the developer first", "When your change touches one of these rules, ask the question instead of silently deciding:");
+    for (const r of qs) lines.push(`- ${r.id}: ${r.coach.question}`);
+  }
+  lines.push(
+    "",
+    "### How to work",
+    "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong. Then work test-first in small steps.",
+    "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
+    CONTEXT_END
+  );
+  return lines.join("\n");
+}
+function mergeManagedBlock(current, block, header) {
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rx = new RegExp(`${esc(CONTEXT_BEGIN)}[\\s\\S]*?${esc(CONTEXT_END)}`);
+  if (rx.test(current)) return current.replace(rx, block);
+  if (!current) return `${header ?? ""}${block}
+`;
+  return `${current}${current.endsWith("\n") ? "" : "\n"}
+${block}
+`;
 }
 
 // src/policy.ts
@@ -628,6 +703,82 @@ var BUILTIN_PACKS = {
       }
     ]
   },
+  smells: {
+    version: 4,
+    rules: [
+      {
+        id: "long-function",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "long-function", max: 40 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/test/**"],
+        why: "Long functions hide several responsibilities; each extra one is a reason to change and a place for bugs.",
+        coach: {
+          question: "How would you name the steps this code goes through \u2014 could each step stand on its own?",
+          reference: "https://refactoring.guru/smells/long-method",
+          kata: `${SAMMAN}/gilded_rose.html`,
+          learningHour: "extract-function"
+        },
+        fix: "Extract the steps into well-named functions; keep this one as the readable summary."
+      },
+      {
+        id: "deep-nesting",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "deep-nesting", max: 3 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        why: "Every nested level is a condition the reader must hold in their head.",
+        coach: {
+          question: "Which condition could exit first, so the main path reads straight down?",
+          reference: "https://refactoring.guru/replace-nested-conditional-with-guard-clauses",
+          kata: `${SAMMAN}/gilded_rose.html`,
+          learningHour: "guard-clauses"
+        },
+        fix: "Invert the outer conditions into guard clauses, or extract the inner block into a function."
+      },
+      {
+        id: "too-many-params",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "too-many-params", max: 4 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        why: "Many parameters usually mean a missing concept, and make call sites easy to get wrong.",
+        coach: {
+          question: "Which of these parameters always travel together \u2014 what would you call that thing?",
+          reference: "https://refactoring.guru/smells/long-parameter-list",
+          kata: `${SAMMAN}/theatrical_players.html`,
+          learningHour: "naming-domain-concepts"
+        },
+        fix: "Introduce a parameter object (or value object) for the values that travel together."
+      },
+      {
+        id: "large-file",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "large-file", max: 400 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/generated/**"],
+        why: "Large files tend to collect unrelated responsibilities and attract merge conflicts.",
+        coach: { question: "If you had to split this file in two, where would the seam be?", reference: "https://refactoring.guru/smells/large-class" }
+      },
+      {
+        id: "duplicated-literal",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        smell: { kind: "duplicated-literal", max: 3 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*"],
+        why: "The same text in several places drifts apart the day one copy changes.",
+        coach: { question: "What does this value mean in the domain, and where should it live once?", reference: "https://refactoring.guru/replace-magic-number-with-symbolic-constant" }
+      }
+    ]
+  },
   "clean-code": {
     version: 4,
     rules: [
@@ -672,7 +823,8 @@ var BUILTIN_REDACT = [
     flags: "i"
   }
 ];
-var KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest"];
+var KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell"];
+var SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal"];
 function validatePolicy(p) {
   const issues = [];
   if (!SUPPORTED_VERSIONS.includes(p.version)) issues.push({ message: `unsupported version ${p.version} (expected ${SUPPORTED_VERSIONS.join(" or ")})` });
@@ -692,6 +844,8 @@ function validatePolicy(p) {
     if (kinds.length !== 1) issues.push({ ruleId: r.id, message: `expected exactly one of ${KINDS.join(", ")}; got ${kinds.join(", ") || "none"}` });
     if (r.mode && !["audit", "enforce", "off"].includes(r.mode)) issues.push({ ruleId: r.id, message: `invalid mode "${r.mode}"` });
     if (r.deny && !/\s->\s/.test(r.deny)) issues.push({ ruleId: r.id, message: 'deny must look like "from/** -> to/**"' });
+    if (r.smell && !SMELL_KINDS.includes(r.smell.kind)) issues.push({ ruleId: r.id, message: `unknown smell "${r.smell.kind}" (${SMELL_KINDS.join(", ")})` });
+    if (r.smell?.max !== void 0 && !(Number(r.smell.max) >= 1)) issues.push({ ruleId: r.id, message: "smell.max must be \u2265 1" });
     if (r.coach?.question && containsCode(r.coach.question)) issues.push({ ruleId: r.id, message: "coach.question must not contain code \u2014 ask, don't answer" });
     if (r.coach?.escalateAfter !== void 0 && !(r.coach.escalateAfter >= 1)) issues.push({ ruleId: r.id, message: "coach.escalateAfter must be \u2265 1" });
     if (r.pattern) {
@@ -869,6 +1023,198 @@ function basename(p) {
   return s.slice(s.lastIndexOf("/") + 1);
 }
 
+// src/smells.ts
+var SMELL_DEFAULTS = {
+  "long-function": 40,
+  "deep-nesting": 3,
+  "too-many-params": 4,
+  "large-file": 400,
+  "duplicated-literal": 3
+};
+function blankCode(src) {
+  const out = [];
+  let inBlock = false;
+  for (const raw of src.split(/\r?\n/)) {
+    let line = "";
+    let i = 0;
+    let quote = null;
+    while (i < raw.length) {
+      const c2 = raw[i];
+      const n = raw[i + 1];
+      if (inBlock) {
+        if (c2 === "*" && n === "/") {
+          inBlock = false;
+          line += "  ";
+          i += 2;
+        } else {
+          line += " ";
+          i++;
+        }
+        continue;
+      }
+      if (quote) {
+        if (c2 === "\\") {
+          line += "  ";
+          i += 2;
+          continue;
+        }
+        if (c2 === quote) quote = null;
+        line += c2 === quote || quote === null ? c2 : " ";
+        i++;
+        continue;
+      }
+      if (c2 === "/" && n === "/") break;
+      if (c2 === "#" && /^\s*$/.test(line)) break;
+      if (c2 === "/" && n === "*") {
+        inBlock = true;
+        line += "  ";
+        i += 2;
+        continue;
+      }
+      if (c2 === '"' || c2 === "'" || c2 === "`") quote = c2;
+      line += c2;
+      i++;
+    }
+    out.push(line);
+  }
+  return out;
+}
+var FN_START = [
+  /\bfunction\b[\s\w$]*\(([^)]*)\)/,
+  // function foo(a, b)
+  /(?:^|[=:,(]\s*)(?:async\s+)?\(([^)]*)\)\s*(?::\s*[^=]+)?=>/,
+  // (a, b) => / const f = (a) =>
+  /^\s*(?:(?:public|private|protected|static|final|async|override|abstract|synchronized|export|default|readonly)\s+)*[\w$<>[\],.?]+\s+[\w$]+\s*\(([^)]*)\)\s*(?:throws\s+[\w.,\s]+)?\{?\s*$/,
+  // Java/C#/TS method: Type name(a, b) {
+  /^\s*(?:(?:public|private|protected|static|async|override|get|set)\s+)*(?!if\b|for\b|while\b|switch\b|catch\b|return\b)[\w$]+\s*\(([^)]*)\)\s*(?::\s*[^{]+)?\{\s*$/,
+  // TS/JS method: name(a, b) {
+  /^\s*(?:async\s+)?def\s+\w+\s*\(([^)]*)\)/,
+  // python
+  /^\s*fun\s+[\w.<>]+\s*\(([^)]*)\)/,
+  // kotlin
+  /^\s*func\s+(?:\([^)]*\)\s*)?\w+\s*\(([^)]*)\)/
+  // go
+];
+var CONTROL = /\b(if|else|for|foreach|while|do|switch|case|try|catch|finally|when|with)\b/;
+function paramCount(list) {
+  const cleaned = list.replace(/<[^<>]*>/g, "").replace(/\{[^{}]*\}/g, "x").replace(/\[[^[\]]*\]/g, "x").trim();
+  if (!cleaned) return 0;
+  return cleaned.split(",").filter((p) => p.trim() && !/^(self|cls|this)\b/.test(p.trim())).length;
+}
+function detectSmell(kind, content, max = SMELL_DEFAULTS[kind]) {
+  const lines = blankCode(content);
+  const isPython = /^\s*(?:async\s+)?def\s+\w+\s*\(/m.test(content) && !/[{}]/.test(lines.join(""));
+  const hits = [];
+  if (kind === "large-file") {
+    const n = content.split(/\r?\n/).filter((l) => l.trim()).length;
+    if (n > max) hits.push({ line: 1, message: `File has ${n} non-empty lines (more than ${max})` });
+    return hits;
+  }
+  if (kind === "duplicated-literal") {
+    const raw = content.split(/\r?\n/);
+    const seen = /* @__PURE__ */ new Map();
+    raw.forEach((l, i) => {
+      if (/^\s*(import|export\s+.*from|from\s+\S+\s+import|package|#include|\/\/|\*|#)/.test(l)) return;
+      for (const m of l.matchAll(/(["'])((?:(?!\1)[^\\]|\\.){8,})\1/g)) {
+        const v = m[2];
+        if (/^[\w./@-]+$/.test(v) && /[/.@]/.test(v) && !/\s/.test(v) && v.split("/").length > 2) continue;
+        seen.set(v, [...seen.get(v) ?? [], i + 1]);
+      }
+    });
+    for (const [v, at] of seen) if (at.length >= max) hits.push({ line: at[max - 1], message: `String "${v.length > 30 ? v.slice(0, 27) + "\u2026" : v}" repeated ${at.length} times` });
+    return hits;
+  }
+  if (kind === "too-many-params") {
+    lines.forEach((l, i) => {
+      for (const rx of FN_START) {
+        const m = rx.exec(l);
+        if (!m) continue;
+        const n = paramCount(m[1] ?? "");
+        if (n > max) hits.push({ line: i + 1, message: `Function takes ${n} parameters (more than ${max})` });
+        break;
+      }
+    });
+    return hits;
+  }
+  if (kind === "long-function") {
+    if (isPython) {
+      lines.forEach((l, i) => {
+        const m = /^(\s*)(?:async\s+)?def\s+(\w+)/.exec(l);
+        if (!m) return;
+        const indent = m[1].length;
+        let end = i;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (!lines[j].trim()) continue;
+          if (lines[j].length - lines[j].trimStart().length <= indent) break;
+          end = j;
+        }
+        const len = lines.slice(i + 1, end + 1).filter((x) => x.trim()).length;
+        if (len > max) hits.push({ line: i + 1, message: `Function ${m[2]} is ${len} lines long (more than ${max})` });
+      });
+      return hits;
+    }
+    for (let i = 0; i < lines.length; i++) {
+      if (!FN_START.some((rx) => rx.test(lines[i]))) continue;
+      let open = -1;
+      for (let j = i; j < Math.min(lines.length, i + 3); j++) if (lines[j].includes("{")) {
+        open = j;
+        break;
+      }
+      if (open < 0) continue;
+      let depth = 0;
+      let end = -1;
+      for (let j = open; j < lines.length && end < 0; j++) {
+        for (const ch of lines[j]) {
+          if (ch === "{") depth++;
+          else if (ch === "}" && --depth === 0) {
+            end = j;
+            break;
+          }
+        }
+      }
+      if (end < 0) continue;
+      const body = lines.slice(open + 1, end).filter((x) => x.trim()).length;
+      if (body > max) {
+        const name = /([\w$]+)\s*(?:=\s*(?:async\s*)?)?\(/.exec(lines[i])?.[1] ?? "function";
+        hits.push({ line: i + 1, message: `Function ${name} is ${body} lines long (more than ${max})` });
+        i = open;
+      }
+    }
+    return hits;
+  }
+  if (isPython) {
+    const stack2 = [];
+    lines.forEach((l, i) => {
+      if (!l.trim()) return;
+      const indent = l.length - l.trimStart().length;
+      while (stack2.length && indent <= stack2[stack2.length - 1]) stack2.pop();
+      if (/^\s*(if|elif|else|for|while|try|except|finally|with)\b.*:\s*$/.test(l)) {
+        stack2.push(indent);
+        if (stack2.length === max + 1) hits.push({ line: i + 1, message: `Control flow nested ${stack2.length} levels deep (more than ${max})` });
+      }
+    });
+    return hits;
+  }
+  const stack = [];
+  let pendingControl = false;
+  lines.forEach((l, i) => {
+    const control = CONTROL.test(l) || pendingControl;
+    pendingControl = control && !l.includes("{") && /\)\s*$|\belse\s*$|\btry\s*$|\bdo\s*$/.test(l);
+    let reported = false;
+    for (const ch of l) {
+      if (ch === "{") {
+        stack.push(control);
+        const depth = stack.filter(Boolean).length;
+        if (control && depth === max + 1 && !reported) {
+          hits.push({ line: i + 1, message: `Control flow nested ${depth} levels deep (more than ${max})` });
+          reported = true;
+        }
+      } else if (ch === "}") stack.pop();
+    }
+  });
+  return hits;
+}
+
 // src/engine.ts
 var IMPORT_RX = [
   /\bimport\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']([^"']+)["']/g,
@@ -896,6 +1242,7 @@ function evaluate(changes, policy, opts = {}) {
       else if (rule.pattern) found = checkPattern(rule, file);
       else if (rule.secrets) found = checkSecrets(rule, file, policy);
       else if (rule.dependencies) found = checkDependencies(rule, file);
+      else if (rule.smell) found = checkSmell(rule, file);
       findings.push(...found.filter((f) => !isSuppressed(file, f)));
     }
   }
@@ -1044,6 +1391,12 @@ function checkDependencies(rule, file) {
   }
   return out;
 }
+function checkSmell(rule, file) {
+  if (!file.content) return [];
+  const added = new Set(file.addedLines.map((l) => l.line));
+  const whole = file.status === "added" || added.size >= file.content.split(/\r?\n/).length;
+  return detectSmell(rule.smell.kind, file.content, rule.smell.max).filter((h) => whole || added.has(h.line)).map((h) => base(rule, file.path, h.line, h.message, "quality", "info"));
+}
 function checkRequireTest(rule, files) {
   const out = [];
   const isTest = (p) => /\.(test|spec)\.[jt]sx?$/.test(p) || p.includes("/__tests__/");
@@ -1170,7 +1523,7 @@ function rulesToGuidance(rules, filePath) {
   if (!rules.length) return `No Copal rules apply${filePath ? ` to ${filePath}` : ""}.`;
   const out = [`Copal engineering policy${filePath ? ` for ${filePath}` : ""} \u2014 follow these rules when writing code:`, ""];
   for (const r of rules) {
-    const what = r.deny ? `Do not import across: ${r.deny}` : r.dependencies ? `Dependencies \u2014 allowed: ${r.dependencies.allow?.join(", ") || "any"}; denied: ${r.dependencies.deny?.join(", ") || "none"}` : r.secrets ? "Never hard-code credentials; read them from configuration/secret manager." : r.requireTest ? `Add/update a test matching ${r.requireTest.test}` : r.message ?? `Avoid pattern /${r.pattern}/`;
+    const what = r.deny ? `Do not import across: ${r.deny}` : r.dependencies ? `Dependencies \u2014 allowed: ${r.dependencies.allow?.join(", ") || "any"}; denied: ${r.dependencies.deny?.join(", ") || "none"}` : r.secrets ? "Never hard-code credentials; read them from configuration/secret manager." : r.requireTest ? `Add/update a test matching ${r.requireTest.test}` : r.smell ? `Avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}` : r.message ?? `Avoid pattern /${r.pattern}/`;
     const fix = typeof r.fix === "string" ? r.fix : r.fix?.with;
     out.push(`- [${r.mode === "enforce" ? "ENFORCED" : "audit"}] ${r.id}: ${what}${r.why ? ` \u2014 ${r.why}` : ""}${fix ? ` (preferred: ${fix})` : ""}`);
     if (r.coach?.question) out.push(`  Ask the developer before writing this kind of code: "${r.coach.question}"`);
@@ -1178,19 +1531,27 @@ function rulesToGuidance(rules, filePath) {
   return out.join("\n");
 }
 export {
+  AGENT_CONTEXT_TARGETS,
   BUILTIN_PACKS,
   BUILTIN_REDACT,
+  CONTEXT_BEGIN,
+  CONTEXT_END,
   HINT_LEVELS,
   POLICY_FILE,
+  SMELL_DEFAULTS,
   SUPPORTED_VERSIONS,
   YamlError,
+  agentContextBlock,
   applicableRules,
+  blankCode,
   bold,
   briefToText,
   buildBrief,
   containsCode,
   cyan,
+  detectSmell,
   dim,
+  draftRuleFromReview,
   effectiveRules,
   evaluate,
   fileAsChange,
@@ -1204,6 +1565,7 @@ export {
   kataSuggestions,
   mask,
   matchGlob,
+  mergeManagedBlock,
   mergePolicies,
   navigatorQuestions,
   normalizePath,

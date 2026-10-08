@@ -46,6 +46,8 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="Copal.PairOnTask" class="dev.copal.jetbrains.PairOnTaskAction"
                     text="Pair on a Task…" description="Navigator: answer up to 3 questions before an AI assistant builds a feature"/>
+            <action id="Copal.SyncAgentFiles" class="dev.copal.jetbrains.SyncAgentFilesAction"
+                    text="Sync Agent Instruction Files" description="Write the team's rules into CLAUDE.md, AGENTS.md, Cursor and Copilot instruction files"/>
             <separator/>
             <action id="Copal.CheckStaged" class="dev.copal.jetbrains.CheckStagedAction"
                     text="Check Staged Changes" description="Run the Copal pre-commit validation on staged changes"/>

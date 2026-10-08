@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { applicableRules, bold, briefToText, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, navigatorQuestions, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, navigatorQuestions, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef } from "./git";
 
@@ -255,52 +255,17 @@ async function claudeHook(): Promise<number> {
   return 0;
 }
 
-const SYNC_TARGETS: Record<string, { file: string; header?: string }> = {
-  claude: { file: "CLAUDE.md" },
-  agents: { file: "AGENTS.md" },
-  cursor: { file: ".cursor/rules/copal.mdc", header: "---\ndescription: Team engineering rules from .copalrules (managed by Copal)\nalwaysApply: true\n---\n" },
-  copilot: { file: ".github/copilot-instructions.md" },
-};
-const BEGIN = "<!-- copal:begin (generated from .copalrules — edit the rules, not this block) -->";
-const END = "<!-- copal:end -->";
-
-/** The block every agent reads: rules, boundaries, questions to ask the developer, and how to work. */
-function contextBlock(repo: ReturnType<typeof loadRepoPolicy>): string {
-  const rules = repo.policy.rules.filter((r) => r.mode !== "off");
-  const lines = [BEGIN, `## Team engineering rules (${repo.project})`, ""];
-  lines.push("Follow these rules when writing code in this repository. ENFORCED rules block the commit and the PR check.");
-  lines.push("");
-  for (const r of rules) {
-    const what = r.deny ? `Do not import across ${r.deny}` : r.secrets ? "Never hard-code credentials" : r.dependencies ? `Only approved dependencies: ${r.dependencies.allow?.join(", ") || "any"}${r.dependencies.deny?.length ? `; never ${r.dependencies.deny.join(", ")}` : ""}` : r.requireTest ? `Changes need a test matching ${r.requireTest.test}` : r.message ?? r.id;
-    lines.push(`- **${r.id}**${r.mode === "enforce" ? " (ENFORCED)" : ""}: ${what}.${r.why ? ` ${r.why}` : ""}${r.coach?.reference ? ` See ${r.coach.reference}.` : ""}`);
-  }
-  const qs = rules.filter((r) => r.coach?.question);
-  if (qs.length) {
-    lines.push("", "### Ask the developer first", "When your change touches one of these rules, ask the question instead of silently deciding:");
-    for (const r of qs) lines.push(`- ${r.id}: ${r.coach!.question}`);
-  }
-  lines.push(
-    "",
-    "### How to work",
-    "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong. Then work test-first in small steps.",
-    "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
-    END,
-  );
-  return lines.join("\n");
-}
-
 function syncContext(flags: Flags): number {
   const repo = loadRepoPolicy(process.cwd());
-  const block = contextBlock(repo);
+  const block = agentContextBlock(repo.policy, repo.project);
   const targets = String(flags.targets ?? "claude,agents,cursor,copilot").split(",").map((t) => t.trim()).filter(Boolean);
   let stale = 0;
   for (const t of targets) {
-    const target = SYNC_TARGETS[t];
+    const target = AGENT_CONTEXT_TARGETS[t];
     if (!target) return console.error(`unknown target "${t}" (claude, agents, cursor, copilot)`), 2;
     const file = path.join(repo.root, target.file);
     const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-    const rx = new RegExp(`${BEGIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?${END}`);
-    const next = rx.test(current) ? current.replace(rx, block) : `${current || target.header || ""}${current && !current.endsWith("\n") ? "\n" : ""}${current ? "\n" : ""}${block}\n`;
+    const next = mergeManagedBlock(current, block, target.header);
     if (next === current) {
       console.log(dim(`= ${target.file} up to date`));
       continue;

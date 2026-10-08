@@ -129,6 +129,10 @@ rules:
     fix: { with: "LedgerPort.round($1, Currency.EUR)" }        # niveau 4 — « Show me » seulement
 ```
 
+**Code smells** : `extends: [builtin:smells]` ajoute des indices (jamais bloquants) pendant l'écriture — fonction longue, imbrication profonde, trop de paramètres, gros fichier, littéral dupliqué — avec question, référence et kata. Heuristiques légères (pas d'AST) : gardez votre analyseur existant (ESLint, Sonar…), Copal ajoute le coaching.
+
+**Bot PR (GitHub / GitLab)** : dans une PR, `/copal explain <règle>` répond avec la hint card ; `/copal rule <texte>` — ou en réponse à un commentaire de revue — rédige un brouillon de règle (YAML + question + lien vers la discussion) enregistré dans la console (`/v1/rules/drafts`). Le workflow `integrations/ci/copal-pr-check.yml` écoute aussi les commentaires.
+
 **Agents** : `copal sync-context` écrit les règles dans `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/copal.mdc` et `.github/copilot-instructions.md` (bloc géré ; `--check` en CI échoue s'ils sont périmés).
 
 **Claude Code** : `copal hook install --claude` ajoute un hook `UserPromptSubmit` — pour une tâche de taille « feature », Claude pose d'abord les questions du navigator puis travaille test d'abord. Avec MCP, l'agent appelle `copal_reflect` puis `copal_brief`.
@@ -212,6 +216,7 @@ En-tête `x-api-key: copal_dev_local` sur `/v1/*`. Les endpoints documentés de 
 | GET / POST | `/v1/katas` | Bibliothèque (katas canoniques crédités) + suggestions par récurrence |
 | POST | `/v1/katas/generate`, `/v1/katas/:id/complete` | Micro-kata depuis un finding ; complétion |
 | GET | `/v1/rules/health` | Par règle : hits, tendance, part « caught late » (vue d'abord en PR/CI), taux de faux positifs, statut (recurring · noisy · caught-late · silent · uncoached) |
+| POST / GET | `/v1/rules/drafts` | Brouillons de règles issus des revues (`/copal rule`) ; `POST /v1/rules/drafts/:id {status}` approuve ou écarte |
 | GET | `/v1/reach` | Dernière activité par surface (pre-commit, PR, agents MCP, navigator, IDE) |
 | GET | `/v1/usage` | Tokens et coût par changement mergé, avec vs sans navigator |
 

@@ -234,7 +234,7 @@ router.post("/v1/coach/reflect/:id/answers", ({ params, body }) => {
   return { brief };
 });
 
-const ACTIONS = ["shown", "ask", "explain", "show_me", "skipped", "answered"];
+const ACTIONS = ["shown", "ask", "explain", "show_me", "skipped", "answered", "false_positive"];
 router.post("/v1/coach/events", ({ body, res }) => {
   const list = Array.isArray(body?.events) ? body.events : [body];
   for (const e of list) {
@@ -318,6 +318,24 @@ router.post("/v1/katas/:id/complete", ({ params, body, res }) => {
 router.get("/v1/rules/health", ({ query }) => {
   const project = query.get("project") ?? Object.keys(store.state.projects)[0];
   return store.ruleHealth(project, store.state.projects[project]?.policy, Number(query.get("days") ?? 30));
+});
+/** Rules drafted from review comments (`/copal rule` in a PR) — a lead finishes and approves them. */
+router.post("/v1/rules/drafts", ({ body }) => {
+  if (typeof body?.text !== "string" || !body.text.trim()) throw new HttpError(400, "text required");
+  const { project, text, source, author, ...rule } = body;
+  const d = { id: "rd_" + crypto.randomBytes(4).toString("hex"), project, text, source, author, rule, status: "draft" as const, createdAt: new Date().toISOString() };
+  store.state.ruleDrafts.unshift(d);
+  store.save();
+  return d;
+});
+router.get("/v1/rules/drafts", ({ query }) => store.state.ruleDrafts.filter((d) => !query.get("project") || d.project === query.get("project")));
+router.post("/v1/rules/drafts/:id", ({ params, body }) => {
+  const d = store.state.ruleDrafts.find((x) => x.id === params.id);
+  if (!d) throw new HttpError(404, "unknown draft");
+  if (!["approved", "dismissed"].includes(body?.status)) throw new HttpError(400, "status must be approved or dismissed");
+  d.status = body.status;
+  store.save();
+  return d;
 });
 router.get("/v1/reach", ({ query }) => store.reach(query.get("project") ?? undefined));
 

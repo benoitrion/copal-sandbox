@@ -50,6 +50,10 @@
       {
         "command": "copal.showMe",
         "title": "Copal: Show me the fix"
+      },
+      {
+        "command": "copal.syncAgentFiles",
+        "title": "Copal: Sync agent instruction files (CLAUDE.md, AGENTS.md, Cursor, Copilot)"
       }
     ],
     "configuration": {

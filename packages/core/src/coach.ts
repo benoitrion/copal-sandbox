@@ -252,5 +252,107 @@ export function ruleSummary(r: Rule): string {
   if (r.secrets) return "no hard-coded credentials";
   if (r.dependencies) return `dependencies allowed: ${r.dependencies.allow?.join(", ") || "any"}`;
   if (r.requireTest) return `changes need a test matching ${r.requireTest.test}`;
+  if (r.smell) return `avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}`;
   return r.message ?? r.why ?? `avoid /${r.pattern}/`;
+}
+
+// ---------------------------------------------------------------- rules from reviews
+export interface RuleDraftInput {
+  /** The review comment (or `/copal rule …` text) the rule comes from. */
+  text: string;
+  /** File the comment was made on — scopes the draft to its folder. */
+  path?: string;
+  /** Link to the discussion — becomes the rule's first source and its reference until a doc exists. */
+  source?: string;
+  author?: string;
+}
+
+export interface RuleDraft {
+  rule: Rule;
+  yaml: string;
+}
+
+/**
+ * Turn a recurring review comment into a rule draft a lead finishes and approves. Copal never guesses the
+ * detector: it proposes the scope, the why, a question and the reference; the lead adds the check (pattern,
+ * deny, smell…) or keeps it as a coaching-only rule that agents receive through `copal sync-context`.
+ */
+export function draftRuleFromReview(input: RuleDraftInput): RuleDraft {
+  const text = input.text.replace(/^\s*\/copal\s+rule\b[:\s]*/i, "").replace(/\s+/g, " ").trim();
+  const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
+  const id = (words.slice(0, 4).join("-") || "review-rule").slice(0, 48);
+  const dir = input.path && input.path.includes("/") ? input.path.slice(0, input.path.lastIndexOf("/")) : undefined;
+  const sentence = text.replace(/[.!]+$/, "");
+  const question = /\?\s*$/.test(text) ? text : `Before you write this: ${sentence.charAt(0).toLowerCase() + sentence.slice(1)} — how does your change handle that?`;
+  const rule: Rule = {
+    id,
+    category: "quality",
+    mode: "audit",
+    ...(dir ? { paths: [`${dir}/**`] } : {}),
+    why: text,
+    sources: [input.source ?? "review comment", ...(input.author ? [`@${input.author}`] : [])],
+    coach: { question: containsCode(question) ? "What should the author check here before asking for review?" : question, ...(input.source ? { reference: input.source } : {}) },
+  };
+  const yaml = [
+    "# Draft from a review comment — finish and add under `rules:` in .copalrules",
+    "# Add ONE check if it can be detected (pattern / deny / smell / requireTest),",
+    "# or keep it coaching-only: agents still receive it through `copal sync-context`.",
+    `- id: ${rule.id}`,
+    `  category: quality`,
+    `  mode: audit`,
+    ...(dir ? [`  paths: ["${dir}/**"]`] : []),
+    `  # pattern: "…"            # e.g. a regex on added lines`,
+    `  why: ${JSON.stringify(text)}`,
+    `  sources: [${rule.sources!.map((s) => JSON.stringify(s)).join(", ")}]`,
+    `  coach:`,
+    `    question: ${JSON.stringify(rule.coach!.question)}`,
+    ...(input.source ? [`    reference: ${input.source}`] : [`    # reference: docs/rules/${rule.id}.md`]),
+    `    # kata: https://sammancoaching.org/kata_descriptions/…`,
+  ].join("\n");
+  return { rule, yaml };
+}
+
+const STOP = new Set(["the", "and", "for", "you", "this", "that", "with", "should", "please", "don", "dont", "not", "are", "use", "here", "have", "from", "into", "our", "we", "always", "never", "must", "avoid", "instead", "copal", "rule"]);
+
+// ---------------------------------------------------------------- agent instruction files
+/** Instruction files each AI assistant reads natively. */
+export const AGENT_CONTEXT_TARGETS: Record<string, { file: string; header?: string }> = {
+  claude: { file: "CLAUDE.md" },
+  agents: { file: "AGENTS.md" },
+  cursor: { file: ".cursor/rules/copal.mdc", header: "---\ndescription: Team engineering rules from .copalrules (managed by Copal)\nalwaysApply: true\n---\n" },
+  copilot: { file: ".github/copilot-instructions.md" },
+};
+export const CONTEXT_BEGIN = "<!-- copal:begin (generated from .copalrules — edit the rules, not this block) -->";
+export const CONTEXT_END = "<!-- copal:end -->";
+
+/** The block every agent reads: rules, questions to ask the developer first, and how to work. */
+export function agentContextBlock(policy: Policy, project?: string): string {
+  const rules = policy.rules.filter((r) => r.mode !== "off");
+  const lines = [CONTEXT_BEGIN, `## Team engineering rules${project ? ` (${project})` : ""}`, ""];
+  lines.push("Follow these rules when writing code in this repository. ENFORCED rules block the commit and the PR check.", "");
+  for (const r of rules) {
+    lines.push(`- **${r.id}**${r.mode === "enforce" ? " (ENFORCED)" : ""}: ${ruleSummary(r)}.${r.why && r.why !== ruleSummary(r) ? ` ${r.why}` : ""}${r.coach?.reference ? ` See ${r.coach.reference}.` : ""}`);
+  }
+  const qs = rules.filter((r) => r.coach?.question);
+  if (qs.length) {
+    lines.push("", "### Ask the developer first", "When your change touches one of these rules, ask the question instead of silently deciding:");
+    for (const r of qs) lines.push(`- ${r.id}: ${r.coach!.question}`);
+  }
+  lines.push(
+    "",
+    "### How to work",
+    "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong. Then work test-first in small steps.",
+    "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
+    CONTEXT_END,
+  );
+  return lines.join("\n");
+}
+
+/** Insert or replace the managed block, leaving everything else in the file untouched. */
+export function mergeManagedBlock(current: string, block: string, header?: string): string {
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rx = new RegExp(`${esc(CONTEXT_BEGIN)}[\\s\\S]*?${esc(CONTEXT_END)}`);
+  if (rx.test(current)) return current.replace(rx, block);
+  if (!current) return `${header ?? ""}${block}\n`;
+  return `${current}${current.endsWith("\n") ? "" : "\n"}\n${block}\n`;
 }

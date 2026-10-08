@@ -10,12 +10,23 @@
  */
 import * as fs from "node:fs";
 import { CopalClient, loadConfig } from "@copal/client";
-import { runCheck } from "./handler";
+import { handleGitHubCommand, runCheck } from "./handler";
 import { GitHubProvider } from "./providers";
 
 async function main(): Promise<number> {
   const event = process.env.GITHUB_EVENT_NAME;
   const payload = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8"));
+  if (event === "issue_comment" || event === "pull_request_review_comment") {
+    const number = payload.issue?.pull_request ? payload.issue.number : payload.pull_request?.number;
+    if (!number) return console.log("copal: comment is not on a pull request"), 0;
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) throw new Error("GITHUB_TOKEN is not set");
+    const repo = process.env.GITHUB_REPOSITORY ?? payload.repository.full_name;
+    const provider = new GitHubProvider({ apiUrl: (process.env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/$/, ""), token }, repo, number);
+    const answered = await handleGitHubCommand(provider, payload, new CopalClient(loadConfig()));
+    console.log(answered ? `copal: answered a /copal command on ${repo}#${number}` : "copal: no /copal command in this comment");
+    return 0;
+  }
   const pr = payload.pull_request;
   if (!pr || !["pull_request", "pull_request_target"].includes(event ?? "")) {
     console.log(`copal: event "${event}" is not a pull request, nothing to do`);

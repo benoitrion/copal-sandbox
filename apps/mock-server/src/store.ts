@@ -112,6 +112,7 @@ export interface State {
   heartbeats: number;
   pulls: FakePull[];
   coachEvents: CoachEventRec[];
+  ruleDrafts: { id: string; project?: string; text: string; source?: string; author?: string; rule: unknown; status: "draft" | "approved" | "dismissed"; createdAt: string }[];
   navSessions: Record<string, NavSession>;
   katas: Kata[];
 }
@@ -131,6 +132,7 @@ export class Store {
     heartbeats: 0,
     pulls: [],
     coachEvents: [],
+    ruleDrafts: [],
     navSessions: {},
     katas: SEED_KATAS.map((k) => ({ ...k, completions: [] })),
   };
@@ -140,6 +142,7 @@ export class Store {
       this.state = { ...this.state, ...JSON.parse(fs.readFileSync(file, "utf8")) };
     }
     this.state.coachEvents ??= [];
+    this.state.ruleDrafts ??= [];
     this.state.navSessions ??= {};
     if (!this.state.katas?.length) this.state.katas = SEED_KATAS.map((k) => ({ ...k, completions: [] }));
     if (!this.state.keys.some((k) => k.key === DEV_KEY)) this.state.keys.push({ key: DEV_KEY, name: "seed dev key", createdAt: new Date().toISOString() });
@@ -238,6 +241,8 @@ export class Store {
       }
       for (const fb of a.feedback) if (fb.verdict === "false-positive") row(fb.ruleId).fp++;
     }
+    // "mark as false positive" from the IDE plugins counts too
+    for (const e of this.state.coachEvents) if (e.action === "false_positive" && (!project || e.project === project) && Date.parse(e.at) >= from) row(e.ruleId).fp++;
     const silentSince = now - 90 * 864e5;
     const everSeen = new Set(this.state.analyses.filter((a) => (!project || a.project === project) && Date.parse(a.createdAt) >= silentSince).flatMap((a) => a.findings.map((f) => f.ruleId)));
     const out = (policy?.rules ?? []).map((rule) => {

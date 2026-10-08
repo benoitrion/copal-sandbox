@@ -141,5 +141,7 @@ class MarkFalsePositiveFix(private val finding: Finding) : IntentionAction {
         val line = (finding.line - 1).coerceIn(0, maxOf(doc.lineCount - 1, 0))
         val indent = CopalText.leadingWhitespace(lineText(doc, line) ?: "")
         doc.insertString(doc.getLineStartOffset(line), CopalText.ignoreLine(indent, prefix, finding.ruleId))
+        // feeds the "noisy rule" signal on the lead's dashboard
+        recordEvent(workDirOf(file), finding, 0, "false_positive")
     }
 }

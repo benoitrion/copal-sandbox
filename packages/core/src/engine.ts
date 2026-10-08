@@ -1,6 +1,7 @@
 import * as posix from "./posix";
 import { inScope, matchGlob, normalizePath } from "./glob";
 import { BUILTIN_REDACT, effectiveRules } from "./policy";
+import { detectSmell } from "./smells";
 import type { Category, FileChange, Finding, Policy, Report, Rule, Severity } from "./types";
 
 export interface EvaluateOptions {
@@ -38,6 +39,7 @@ export function evaluate(changes: FileChange[], policy: Policy, opts: EvaluateOp
       else if (rule.pattern) found = checkPattern(rule, file);
       else if (rule.secrets) found = checkSecrets(rule, file, policy);
       else if (rule.dependencies) found = checkDependencies(rule, file);
+      else if (rule.smell) found = checkSmell(rule, file);
       findings.push(...found.filter((f) => !isSuppressed(file, f)));
     }
   }
@@ -201,6 +203,17 @@ function checkDependencies(rule: Rule, file: FileChange): Finding[] {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------- smells
+/** Needs full content. Reports only smells anchored on a changed line (or anywhere in a new file / editor buffer). */
+function checkSmell(rule: Rule, file: FileChange): Finding[] {
+  if (!file.content) return [];
+  const added = new Set(file.addedLines.map((l) => l.line));
+  const whole = file.status === "added" || added.size >= file.content.split(/\r?\n/).length;
+  return detectSmell(rule.smell!.kind, file.content, rule.smell!.max)
+    .filter((h) => whole || added.has(h.line))
+    .map((h) => base(rule, file.path, h.line, h.message, "quality", "info"));
 }
 
 // ---------------------------------------------------------------- tests

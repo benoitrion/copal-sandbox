@@ -71,6 +71,11 @@ export interface Rule {
         allow?: string[];
         deny?: string[];
     };
+    /** Code smell (heuristic, needs full file content): long-function, deep-nesting, too-many-params, large-file, duplicated-literal. */
+    smell?: {
+        kind: "long-function" | "deep-nesting" | "too-many-params" | "large-file" | "duplicated-literal";
+        max?: number;
+    };
     /** Changes to `paths` must come with a changed test file matching this template ({name}, {dir}). */
     requireTest?: {
         test: string;

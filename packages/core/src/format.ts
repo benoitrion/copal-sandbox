@@ -112,7 +112,9 @@ export function rulesToGuidance(rules: Rule[], filePath?: string): string {
           ? "Never hard-code credentials; read them from configuration/secret manager."
           : r.requireTest
             ? `Add/update a test matching ${r.requireTest.test}`
-            : r.message ?? `Avoid pattern /${r.pattern}/`;
+            : r.smell
+              ? `Avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}`
+              : r.message ?? `Avoid pattern /${r.pattern}/`;
     const fix = typeof r.fix === "string" ? r.fix : r.fix?.with;
     out.push(`- [${r.mode === "enforce" ? "ENFORCED" : "audit"}] ${r.id}: ${what}${r.why ? ` — ${r.why}` : ""}${fix ? ` (preferred: ${fix})` : ""}`);
     if (r.coach?.question) out.push(`  Ask the developer before writing this kind of code: "${r.coach.question}"`);

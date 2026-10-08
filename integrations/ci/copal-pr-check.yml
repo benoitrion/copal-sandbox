@@ -1,17 +1,25 @@
 # Copal PR check inside GitHub Actions: commit status `copal/check` + review with inline findings,
 # using the job's own token. No GitHub App, no webhook. Copy to .github/workflows/copal.yml.
 # Optional repository secrets COPAL_SERVER / COPAL_API_KEY record each check in a Copal console.
+# Comments starting with /copal (help · explain <rule> · rule [text]) are answered in the PR by the same job.
 name: copal
 on:
   pull_request:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
 
 permissions:
   contents: read
   pull-requests: write
   statuses: write
+  issues: write
 
 jobs:
   copal:
+    # comments: only on PRs, only when they hold a /copal command (other comments don't start a runner)
+    if: github.event_name == 'pull_request' || (contains(github.event.comment.body, '/copal') && (github.event.issue.pull_request || github.event.pull_request))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
