@@ -1,0 +1,107 @@
+name: precommit-demo
+# Installs the real Copal pre-commit hook in a copy of billing-api and makes commits against a Copal server:
+#   1. a commit with scenario 01 (inline rounding + AWS key)  -> blocked by the hook
+#   2. the same feature done right (scenario 05)              -> accepted
+# Both checks are recorded on the server (source "precommit") and should appear on the console's Pre-commit page.
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: "Copal server URL (empty = latest demo server from the demo-server issue)"
+        required: false
+      key:
+        description: "API key (empty = from the demo-server issue)"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund && npm run build
+      - name: Resolve target server
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IN_SERVER: ${{ inputs.server }}
+          IN_KEY: ${{ inputs.key }}
+        run: |
+          S="$IN_SERVER"; K="$IN_KEY"
+          if [ -z "$S" ]; then
+            N=$(gh issue list --state open --label demo-server --json number --jq '.[0].number')
+            LINE=$( (gh api "repos/$GITHUB_REPOSITORY/issues/$N" --jq .body; gh api "repos/$GITHUB_REPOSITORY/issues/$N/comments" --jq '.[].body') | grep -o 'export COPAL_SERVER=[^ ]* COPAL_API_KEY=[^ `]*' | tail -1)
+            S=$(echo "$LINE" | sed -E 's/.*COPAL_SERVER=([^ ]*).*/\1/'); K=$(echo "$LINE" | sed -E 's/.*COPAL_API_KEY=([^ ]*).*/\1/')
+          fi
+          echo "::add-mask::$K"
+          echo "SERVER=$S" >> "$GITHUB_ENV"; echo "KEY=$K" >> "$GITHUB_ENV"
+
+      - name: Install the hook and commit
+        run: |
+          set -u
+          COPAL="node $GITHUB_WORKSPACE/packages/cli/dist/src/index.js"
+          SC="$GITHUB_WORKSPACE/examples/billing-api/scenarios"
+          W=$(mktemp -d); export HOME="$W/home"; mkdir -p "$HOME"
+          cp -r examples/billing-api/. "$W/repo"; cd "$W/repo"; rm -rf scenarios node_modules
+          git init -q -b main; git config user.name "Benoit Rion (precommit-demo)"; git config user.email "precommit-demo@example.com"
+          git add -A; git commit -qm "chore: billing-api baseline" --no-verify
+
+          $COPAL login --server "$SERVER" --key "$KEY" > /dev/null
+          $COPAL hook install
+          export NO_COLOR=1 COPAL_AGENT=precommit-demo
+
+          # 1) commit that the hook must block
+          cp -r "$SC/01-invoice-rounding/src" . && git add -A
+          if git commit -m "feat: invoice totals (precommit-demo)" > ../c1.log 2>&1; then echo "::error::commit 1 should have been blocked"; exit 1; fi
+          A1=$(grep -o 'server analysis an_[a-z0-9]*' ../c1.log | awk '{print $3}')
+          R1=$(grep -o '\[[a-z-]*\]' ../c1.log | sort -u | tr '\n' ' ')
+          cat ../c1.log
+
+          # 2) the same feature done right (scenario 05): the hook must accept it
+          git checkout -q -- src && cp -r "$SC/05-feature-done-right/src" . && git add -A
+          git commit -m "feat: invoice totals with VAT, done right (precommit-demo)" > ../c2.log 2>&1 || { cat ../c2.log; echo "::error::commit 2 should pass"; exit 1; }
+          A2=$(grep -o 'server analysis an_[a-z0-9]*' ../c2.log | awk '{print $3}')
+          R2=$(grep -o '\[[a-z-]*\]' ../c2.log | sort -u | tr '\n' ' ')
+          cat ../c2.log
+          [ -n "$A1" ] && [ -n "$A2" ] || { echo "::error::checks were not recorded on the server"; exit 1; }
+
+          # confirm the server lists them as pre-commit analyses
+          curl -sf "$SERVER/v1/analyses?project=billing-api&limit=20" -H "x-api-key: $KEY" > ../analyses.json
+          node -e '
+            const a = require(process.argv[1]); const ids = process.argv.slice(2);
+            for (const id of ids) { const x = a.find((r) => r.id === id); if (!x) { console.error("missing " + id); process.exit(1); }
+              console.log(id, x.source, x.title, "blocking=" + x.blocking, "agent=" + x.agent, "author=" + x.author); }' "$W/analyses.json" "$A1" "$A2" | tee ../listed.txt
+
+          {
+            echo "## 🪝 Pre-commit hook demo — $(date -u +%H:%MZ)"
+            echo
+            echo "Server \`${SERVER#https://}\` · real \`copal hook install\` in a copy of billing-api · author \`Benoit Rion (precommit-demo)\` · agent \`precommit-demo\`"
+            echo
+            echo "| Commit | Hook | Analysis (source \`precommit\`) | Rules |"
+            echo "|---|---|---|---|"
+            echo "| feat: invoice totals | ⛔ blocked | \`$A1\` | $R1 |"
+            echo "| feat: invoice totals with VAT, done right | ✅ accepted | \`$A2\` | ${R2:-none} |"
+            echo
+            echo "Both are listed by \`GET /v1/analyses\` and should appear on the console's Pre-commit page (titles start with \`pre-commit (\`)."
+            echo
+            echo '```'
+            cat ../listed.txt
+            echo '```'
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$GITHUB_WORKSPACE/report.md"
+
+      - name: Publish report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f report.md ] || echo "## ❌ precommit-demo failed — see $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          N=$(gh issue list --state open --label api-test --json number --jq '.[0].number')
+          gh issue comment "$N" --body-file report.md
