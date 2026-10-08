@@ -31,6 +31,8 @@ if (!SERVER) {
 
 // ------------------------------------------------------------------ tiny test harness
 const results = [];
+/** Thrown by a check that does not apply to this server (e.g. no fake GitHub outside the reference mock). */
+class Skip extends Error {}
 async function check(group, name, fn) {
   const t0 = Date.now();
   try {
@@ -38,8 +40,13 @@ async function check(group, name, fn) {
     results.push({ group, name, ok: true, ms: Date.now() - t0, detail: detail ?? "" });
     console.log(`  ✔ ${name}${detail ? ` — ${detail}` : ""}`);
   } catch (e) {
-    results.push({ group, name, ok: false, ms: Date.now() - t0, detail: e.message });
-    console.log(`  ✖ ${name} — ${e.message}`);
+    if (e instanceof Skip) {
+      results.push({ group, name, ok: true, skipped: true, ms: Date.now() - t0, detail: `skipped: ${e.message}` });
+      console.log(`  – ${name} — skipped: ${e.message}`);
+    } else {
+      results.push({ group, name, ok: false, ms: Date.now() - t0, detail: e.message });
+      console.log(`  ✖ ${name} — ${e.message}`);
+    }
   }
 }
 const assert = (cond, msg) => {
@@ -111,16 +118,24 @@ await check("contract", "GET /v1/status with a wrong key → 401", async () => {
 await check("contract", "GET /v1/status", async () => {
   const s = await api("GET", "/v1/status");
   for (const k of ["workspace", "plan", "projects", "controls", "serverTime"]) assert(k in s, `missing ${k}`);
-  assert(s.projects.includes("billing-api"), "billing-api not loaded");
-  return `workspace ${s.workspace}, ${s.controls} controls`;
+  assert(Array.isArray(s.projects), "projects must be an array");
+  return `workspace ${s.workspace}, projects [${s.projects.join(", ")}], ${s.controls} controls`;
 });
 await check("contract", "billing-api policy on the server = repo .copalrules", async () => {
-  const p = await api("GET", "/v1/projects/billing-api/policy?file=src/web/invoice-controller.ts");
+  const route = "/v1/projects/billing-api/policy?file=src/web/invoice-controller.ts";
+  let uploaded = "";
+  const first = await api("GET", route, undefined, { raw: true });
+  if (first.status === 404 && WRITES) {
+    // fresh workspace: upload the project-owned policy, as a client would on first use
+    await api("PUT", "/v1/projects/billing-api/policy", { yaml: policyText });
+    uploaded = " (was missing: uploaded from the repo)";
+  } else if (first.status !== 200) throw new Error(`GET ${route} → ${first.status} ${first.text.slice(0, 160)}`);
+  const p = uploaded ? await api("GET", route) : first.json;
   const server = p.policy.rules.map((r) => `${r.id}:${r.mode}`).sort();
   const local = policy.rules.map((r) => `${r.id}:${r.mode}`).sort();
   assert(JSON.stringify(server) === JSON.stringify(local), `rules differ: server [${server}] vs repo [${local}]`);
   assert(p.applicable.some((r) => r.id === "ui-no-persistence"), "applicable rules for src/web must include ui-no-persistence");
-  return `v${p.version}, ${server.length} rules`;
+  return `v${p.version}, ${server.length} rules${uploaded}`;
 });
 
 group("billing-api source through POST /v1/analyze (compared with the local engine)");
@@ -225,6 +240,11 @@ if (WRITES) {
     return /server analysis (an_\w+)/.exec(r.out)?.[1] ?? "";
   });
   await check("clients", "PR webhook: GitHub PR gets failure status + inline review", async () => {
+    // Only the reference server embeds a fake GitHub to simulate PRs against; real PR checks run in GitHub
+    // (see benoitrion/billing-api). Probe with a ping before simulating.
+    const ping = await fetch(SERVER + "/webhooks/github", { method: "POST", headers: { "content-type": "application/json", "x-github-event": "ping", "x-copal-wait": "1" }, body: "{}" }).catch(() => null);
+    const pong = ping && ping.ok ? await ping.text() : "";
+    if (!pong.includes("pong")) throw new Skip("this server has no /webhooks/github endpoint (PR checks can run in GitHub Actions instead)");
     const number = 7000 + Math.floor(Math.random() * 999);
     const out = execFileSync(process.execPath, [path.join(ROOT, "packages/git-app/dist/src/server.js"), "simulate", "--provider", "github", "--dir", work,
       "--base", "main", "--head", "HEAD", "--repo", "acme/billing-api", "--number", String(number), "--app", SERVER, "--mock", SERVER, "--title", `${RUN} · UI→DB PR`],
@@ -237,7 +257,8 @@ if (WRITES) {
 
 // ------------------------------------------------------------------ report
 const failed = results.filter((r) => !r.ok);
-const summary = `${results.length - failed.length}/${results.length} passed`;
+const skipped = results.filter((r) => r.skipped);
+const summary = `${results.length - failed.length - skipped.length}/${results.length - skipped.length} passed${skipped.length ? `, ${skipped.length} skipped` : ""}`;
 console.log(`\n${failed.length ? "✖" : "✔"} ${summary}`);
 if (mdOut) {
   const host = new URL(SERVER).host;
@@ -248,7 +269,7 @@ if (mdOut) {
     "",
     "| | Check | Result |",
     "|---|---|---|",
-    ...results.map((r) => `| ${r.ok ? "✅" : "❌"} | ${r.name} | ${(r.detail || "").replace(/\n/g, "<br>").replace(/\|/g, "\\|")} |`),
+    ...results.map((r) => `| ${r.skipped ? "➖" : r.ok ? "✅" : "❌"} | ${r.name} | ${(r.detail || "").replace(/\n/g, "<br>").replace(/\|/g, "\\|")} |`),
   ];
   fs.writeFileSync(mdOut, lines.join("\n") + "\n");
 }

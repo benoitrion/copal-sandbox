@@ -8,7 +8,7 @@ on:
         description: "Copal server URL (empty = latest demo server from the demo-server issue)"
         required: false
       key:
-        description: "API key for that server (empty = from the demo-server issue)"
+        description: "API key — leave EMPTY for any real workspace and store it as the repository secret COPAL_TEST_API_KEY (inputs are not secret)"
         required: false
 
 permissions:
@@ -29,8 +29,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IN_SERVER: ${{ inputs.server }}
           IN_KEY: ${{ inputs.key }}
+          SECRET_KEY: ${{ secrets.COPAL_TEST_API_KEY }}
         run: |
           S="$IN_SERVER"; K="$IN_KEY"
+          if [ -n "$S" ] && [ -z "$K" ]; then K="$SECRET_KEY"; [ -n "$K" ] || { echo "::error::server given without key: set the repository secret COPAL_TEST_API_KEY"; exit 1; }; fi
           if [ -z "$S" ]; then
             N=$(gh issue list --state open --label demo-server --json number --jq '.[0].number')
             LINE=$( (gh api "repos/$GITHUB_REPOSITORY/issues/$N" --jq .body; gh api "repos/$GITHUB_REPOSITORY/issues/$N/comments" --jq '.[].body') | grep -o 'export COPAL_SERVER=[^ ]* COPAL_API_KEY=[^ `]*' | tail -1)
