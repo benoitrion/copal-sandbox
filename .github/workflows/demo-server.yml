@@ -10,6 +10,10 @@ on:
         default: "120"
         required: true
 
+permissions:
+  contents: read
+  issues: write
+
 concurrency:
   group: demo-server
   cancel-in-progress: true
@@ -54,6 +58,7 @@ jobs:
       - name: Publish URLs
         env:
           HAS_SECRET: ${{ secrets.COPAL_MOCK_DEV_KEY != '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Without the secret, a random throwaway key is generated and shown here (visible to anyone who can read this run).
           if [ "$HAS_SECRET" = "true" ]; then KEY="(repository secret COPAL_MOCK_DEV_KEY)"; else KEY=$(cat .data/dev-key); fi
@@ -72,7 +77,17 @@ jobs:
             echo '```bash'
             echo "export COPAL_SERVER=$BACKEND_URL COPAL_API_KEY=$KEY"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY" > urls.md
+          echo "" >> urls.md
+          echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID — cancel it to stop the servers." >> urls.md
+          # Post the URLs where they are visible while the job is still running (annotations only appear at the end).
+          N=$(gh issue list --state open --label demo-server --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -z "$N" ]; then
+            gh label create demo-server --color B86E00 --description "Copal demo server URLs" 2>/dev/null || true
+            gh issue create --title "Copal demo server" --label demo-server --body-file urls.md
+          else
+            gh issue comment "$N" --body-file urls.md
+          fi
 
       - name: Keep alive
         run: |
