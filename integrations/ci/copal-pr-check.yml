@@ -1,0 +1,32 @@
+# Copal PR check inside GitHub Actions: commit status `copal/check` + review with inline findings,
+# using the job's own token. No GitHub App, no webhook. Copy to .github/workflows/copal.yml.
+# Optional repository secrets COPAL_SERVER / COPAL_API_KEY record each check in a Copal console.
+name: copal
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  copal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: benoitrion/copal-sandbox
+          ref: main
+          path: .copal
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund && npm run build
+        working-directory: .copal
+      - name: Copal check
+        run: node .copal/packages/git-app/dist/src/action.js
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COPAL_SERVER: ${{ secrets.COPAL_SERVER }}
+          COPAL_API_KEY: ${{ secrets.COPAL_API_KEY }}

@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import { CopalClient } from "@copal/client";
+import { reportToMarkdown } from "@copal/core";
 import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider } from "./providers";
 
 const lastAnalysis = new Map<string, string>(); // PR label -> analysisId (for /copal feedback)
@@ -48,7 +49,18 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       : result.findings.length
         ? `Passed with ${result.summary.audit} audit finding(s)`
         : "Passed — no findings";
-    if (result.findings.length) await provider.postReview(cs.headSha, result, result.findings);
+    if (result.findings.length) {
+      // GitHub/GitLab reject the whole review if an inline comment targets a line outside the diff:
+      // inline only findings on added lines; every finding is still listed in the review summary.
+      const inDiff = new Set(cs.files.flatMap((f) => f.addedLines.map((l) => `${f.path}:${l.line}`)));
+      const inline = result.findings.filter((f) => inDiff.has(`${f.file}:${f.line}`));
+      try {
+        await provider.postReview(cs.headSha, result, inline);
+      } catch (e) {
+        log(`${provider.label} review failed (${(e as Error).message}); posting a summary comment instead`);
+        await provider.comment(reportToMarkdown(result));
+      }
+    }
     await provider.setStatus(cs.headSha, result.blocking ? "failure" : "success", desc);
     log(`${provider.label} → ${desc}`);
     return result;
