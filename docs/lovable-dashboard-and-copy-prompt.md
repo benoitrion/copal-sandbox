@@ -10,8 +10,8 @@ Do not reinvent the wheel: no quality-gate engine (link to SonarQube/CI), no lea
 no PR inbox (PRs are handled in GitHub/GitLab), no per-person scoring, no cost-per-change until sessions are linked to commits.
 
 ## Non-negotiables
-- /api/public/v1 must keep passing scripts/api-test.mjs (github.com/benoitrion/copal-sandbox): now 33 checks
-  (25 contract + 8 coaching). Reference implementation: apps/mock-server in copal-sandbox.
+- /api/public/v1 must keep passing scripts/api-test.mjs (github.com/benoitrion/copal-sandbox): now 34 checks
+  (25 contract + 9 coaching). Reference implementation: apps/mock-server in copal-sandbox.
 - Engine: @copal/core core-v0.2.0 (https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.2.0/packages/core/esm/copal-core.mjs).
 - Never display or log API keys/secrets. No app content depends on the "Add VAT" example.
 
@@ -45,7 +45,9 @@ Definitions (same as the reference server):
 Table, rules with a status first: rule · hits · trend arrow · caught late % · false + % · status pills · **one action**:
 - recurring → [Kata] (rule's kata link) · [Sharpen question] (opens the rule in Rules)
 - caught-late → [Sync agent files] (setup snippet) · [Sharpen question]
-- noisy → [Review feedback] (opens Checks filtered on that rule's false-positive notes)
+- noisy → [Review feedback] (opens Checks filtered on that rule's false-positive notes). False positives come from
+  PR feedback (`/copal false-positive`, Checks buttons) **and** from the IDE plugins (`POST /v1/coach/events` with
+  `action: "false_positive"`) — count both.
 - silent → [Retire?] (opens the rule; never auto-deletes)
 - uncoached → [Add coaching]
 Rules without a status collapse under "N rules healthy".
@@ -57,7 +59,16 @@ source, author, agent, counts, time. PR rows link to GitHub/GitLab. Row click �
 ## B. Rules (configuration, not dashboard)
 The existing editor (`GET/PUT /v1/projects/:name/policy`, YAML tab, validation). Per rule: question, why, wrong/right
 example, reference link, kata link (credited), mode, and the live **hint-card preview**. Deep-linkable per rule
-(`/rules#ledger-rounding`) for the dashboard actions. Starter packs: security, quality, testing, hexagonal, clean-code.
+(`/rules#ledger-rounding`) for the dashboard actions. Starter packs: security, quality, testing, hexagonal, clean-code,
+**smells** (long function, deep nesting, too many parameters, large file, duplicated literal — `smell: {kind, max}`
+rules; always hints, never blocking; thresholds editable).
+
+**Drafts tab — rules that grow from review.** `GET /v1/rules/drafts?project=` lists drafts created when someone types
+`/copal rule …` in a PR (or replies `/copal rule` to a reviewer's comment). Each draft shows the original comment, its
+author and a link to the discussion, plus the proposed rule (scope, why, question, reference = the discussion link).
+Actions: **Edit & approve** (opens the editor prefilled; on save `PUT` the policy and `POST /v1/rules/drafts/:id
+{status:"approved"}`) · **Dismiss** (`{status:"dismissed"}`). A badge on "Rules" shows the number of open drafts, and
+Block 2 of the dashboard lists "N rule drafts from review" with [Review] when there are any.
 
 ## C. Checks (detail, reached from the dashboard)
 List + detail of analyses (`GET /v1/analyses`, `/v1/analyses/:id`) with filters (source, rule, outcome). Findings
@@ -80,6 +91,12 @@ uncoached) and one surface "not seen yet". Label it "Sample data".
    spend per merged change" with:
    **Keep the rules alive.** "Copal shows which rules keep recurring, which ones reach review too late, which developers
    flag as wrong, and which never fire — so your standards get sharper with every review."
+2a. **Add a section "Copal in your pull requests"** — "Copal reviews every PR and leads each comment with a question;
+   the reasons, the team reference and the fix stay one click away. Type `/copal explain <rule>` for the full hint
+   card, or reply `/copal rule` to a review comment to turn it into a rule draft your lead approves. Works as a
+   GitHub Action, a GitHub App or a GitLab job."
+2b. **Add to "Hints while coding"** — "Copal also flags code smells as you type — long functions, deep nesting, too
+   many parameters — as a question with a reference and a kata, never a blocker. Keep your linter; Copal adds the coaching."
 2. **Add a step before the navigator** — **Your AI reads your standards.** "`copal sync-context` writes your team's rules
    into CLAUDE.md, AGENTS.md, Cursor and Copilot instructions, so every assistant starts with your context."
 3. **Navigator claim** — replace "clearer briefs mean fewer retries and fewer tokens" with "Designed to cut retries and
@@ -102,7 +119,8 @@ Keep unchanged: hero, the three cited statistics, "A coach, not a gatekeeper or 
 ## Acceptance criteria
 - Navigation is exactly Dashboard · Rules · Checks · Settings; removed pages are gone and redirect.
 - Dashboard renders the three blocks from `/v1/reach`, `/v1/rules/health`, `/v1/analyses`; every table row and chip has an action.
-- `/v1/reach` and `/v1/rules/health` match the reference server's shapes; api-test 33/33 against the real backend.
+- `/v1/reach`, `/v1/rules/health` and `/v1/rules/drafts` match the reference server's shapes; api-test 34/34 against the real backend.
+- Rules has a Drafts tab with approve/dismiss; the smells pack is selectable.
 - Landing copy contains none of: "test-first ratio", "AI spend per merged change", "only security issues block",
   "air-gapped deployment are available", "Open core" (until licensed).
 

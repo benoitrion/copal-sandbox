@@ -253,6 +253,16 @@ await check("coach", "GET /v1/rules/health: hits, caught late, false positives a
   const flagged = json.rules.filter((r) => r.status.length).map((r) => `${r.ruleId}:${r.status.join("+")}`);
   return flagged.slice(0, 3).join(", ") || "no rule needs attention";
 });
+if (WRITES) {
+  await check("coach", "POST/GET /v1/rules/drafts: a review comment becomes a rule draft", async () => {
+    const d = core.draftRuleFromReview({ text: "Don't call the payment provider from controllers, go through PaymentPort.", path: "src/web/checkout.ts", source: "https://github.com/o/r/pull/7#discussion_r1", author: "api-test" });
+    const { json } = await coachApi("POST", "/v1/rules/drafts", { project: "billing-api", ...d.rule, text: "Don't call the payment provider from controllers, go through PaymentPort.", source: "https://github.com/o/r/pull/7#discussion_r1", author: "api-test" });
+    assert(typeof json.id === "string", "draft id expected");
+    const list = (await coachApi("GET", "/v1/rules/drafts?project=billing-api")).json;
+    assert(Array.isArray(list) && list.some((x) => x.id === json.id), "draft not listed");
+    return `draft ${json.id}`;
+  });
+}
 await check("coach", "GET /v1/reach: last seen per surface", async () => {
   const { json } = await coachApi("GET", "/v1/reach?project=billing-api");
   for (const k of ["precommit", "prCheck", "agentSelfCheck", "agents", "navigator"]) assert(k in json, `reach.${k} missing`);
