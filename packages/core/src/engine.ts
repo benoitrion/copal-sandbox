@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import * as posix from "./posix";
 import { inScope, matchGlob, normalizePath } from "./glob";
 import { BUILTIN_REDACT, effectiveRules } from "./policy";
 import type { Category, FileChange, Finding, Policy, Report, Rule, Severity } from "./types";
@@ -89,7 +89,7 @@ export function parseDeny(deny: string): { from: string[]; to: string[] } {
 
 function resolveImport(fromFile: string, spec: string): string {
   if (!spec.startsWith(".")) return spec;
-  return path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), spec));
+  return posix.normalize(posix.join(posix.dirname(fromFile), spec));
 }
 
 function checkBoundary(rule: Rule, file: FileChange): Finding[] {
@@ -172,7 +172,7 @@ function depNames(file: FileChange): Set<string> | null {
 }
 
 function checkDependencies(rule: Rule, file: FileChange): Finding[] {
-  if (path.posix.basename(file.path) !== "package.json") return [];
+  if (posix.basename(file.path) !== "package.json") return [];
   const known = depNames(file);
   const { allow, deny } = rule.dependencies!;
   const out: Finding[] = [];
@@ -206,8 +206,8 @@ function checkRequireTest(rule: Rule, files: FileChange[]): Finding[] {
   const isTest = (p: string) => /\.(test|spec)\.[jt]sx?$/.test(p) || p.includes("/__tests__/");
   for (const file of files) {
     if (isTest(file.path) || !inScope(file.path, rule.paths, rule.exclude)) continue;
-    const dir = path.posix.dirname(file.path);
-    const name = path.posix.basename(file.path).replace(/\.[^.]+$/, "");
+    const dir = posix.dirname(file.path);
+    const name = posix.basename(file.path).replace(/\.[^.]+$/, "");
     const expected = rule.requireTest!.test.replace(/\{dir\}/g, dir).replace(/\{name\}/g, name);
     if (!files.some((f) => matchGlob(f.path, expected))) {
       out.push(base(rule, file.path, file.addedLines[0]?.line ?? 1, `Change has no accompanying test (expected ${expected})`, "testing", "warning"));
@@ -244,7 +244,7 @@ export function applicableRules(policy: Policy, filePath: string | undefined, en
   const p = normalizePath(filePath);
   return rules.filter((r) => {
     if (r.deny) return matchGlob(p, parseDeny(r.deny).from) && inScope(p, r.paths, r.exclude);
-    if (r.dependencies) return path.posix.basename(p) === "package.json";
+    if (r.dependencies) return posix.basename(p) === "package.json";
     return inScope(p, r.paths, r.exclude);
   });
 }

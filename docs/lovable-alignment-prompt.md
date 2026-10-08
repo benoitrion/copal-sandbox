@@ -20,13 +20,20 @@ A running reference backend (the mock in `apps/mock-server`) is available for co
 - Reference mock: the latest URL and API key are posted in https://github.com/benoitrion/copal-sandbox/issues/1.
 - It is a temporary demo server, restarted through *Actions → demo-server*.
 
-## 1. Reuse the rule engine, do not rewrite it
+## 1. Import the rule engine, do not copy or rewrite it
 
-Copy `packages/core/src/*.ts` from the repository into `supabase/functions/_shared/copal-core/`. The files are `types.ts`, `yaml.ts`, `glob.ts`, `policy.ts`, `diff.ts`, `engine.ts` and `format.ts`.
+The engine is published as a versioned, single-file ES module that runs in Deno with no Node built-ins. Import it by URL in the Edge Function. If the app currently has a checked-in copy of the engine, delete it and use this import instead.
 
-- It is dependency-free TypeScript, and Deno supports the `node:path` import it uses.
-- Do not use the functions that read the filesystem (`loadPolicy`, `readPolicyFile`, `findPolicyFile`). On the server, the policy always arrives as text: use `parsePolicy`, `resolvePolicy`, `validatePolicy`, `evaluate`, `fileAsChange`, `redact`, `applicableRules`, `rulesToGuidance`.
-- The expected behaviour is pinned by `packages/core/test/engine.test.ts` and the scenarios in `examples/billing-api/scenarios/`.
+```ts
+// supabase/functions/_shared/copal.ts
+// @ts-types="https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.1.0/packages/core/esm/copal-core.d.ts"
+export * from "https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-v0.1.0/packages/core/esm/copal-core.mjs";
+```
+
+- Everything else imports from `../_shared/copal.ts`, so upgrading means changing one tag (`core-vX.Y.Z`, see the repository releases). Each tag is immutable.
+- Use `parsePolicy`, `resolvePolicy`, `validatePolicy`, `evaluate`, `fileAsChange`, `redact`, `applicableRules`, `rulesToGuidance`.
+- Call `resolvePolicy(parsePolicy(text))` with no loader. Only `extends: [builtin:…]` packs resolve; a policy that references a file is refused with an error. Return that error as 422, so clients can never make the server read files.
+- The expected behaviour is pinned by `packages/core/test/` and the scenarios in `examples/billing-api/scenarios/`.
 
 ## 2. Backend: public API
 

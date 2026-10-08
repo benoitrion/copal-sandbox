@@ -22,6 +22,7 @@ import {
   toYaml,
   validatePolicy,
   fileAsChange,
+  nodePolicyLoader,
 } from "@copal/core";
 import { Ctx, HttpError, Router } from "./http";
 import { DEV_KEY, HARDENED, Store } from "./store";
@@ -38,9 +39,18 @@ const port = Number(arg("port", process.env.PORT ?? "4010"));
 const store = new Store(arg("persist"));
 const router = new Router();
 
-function upsertProject(name: string, yaml: string, baseDir = process.cwd()) {
+/**
+ * `baseDir` is only passed for policies seeded from local disk. Policies received over HTTP get no file loader,
+ * so `extends:` can only name builtin packs and a client can never make the server read local files.
+ */
+function upsertProject(name: string, yaml: string, baseDir?: string) {
   const parsed = parsePolicy(yaml);
-  const policy = resolvePolicy(parsed, baseDir);
+  let policy;
+  try {
+    policy = baseDir ? resolvePolicy(parsed, baseDir, nodePolicyLoader) : resolvePolicy(parsed);
+  } catch (e) {
+    throw new HttpError(422, `invalid policy: ${(e as Error).message}`);
+  }
   const issues = validatePolicy(policy);
   if (issues.length) throw new HttpError(422, "invalid policy: " + issues.map((i) => `${i.ruleId ?? ""} ${i.message}`).join("; "));
   const prev = store.state.projects[name];

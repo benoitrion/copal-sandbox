@@ -1,5 +1,3 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { parseYaml } from "./yaml";
 import type { Mode, Policy, RedactPattern, Rule } from "./types";
 
@@ -157,8 +155,17 @@ function stripUndef<T extends object>(o: T): Partial<T> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
-/** Resolve `extends` recursively. Paths are relative to `baseDir`. */
-export function resolvePolicy(p: Policy, baseDir: string, loader = readPolicyFile, depth = 0): Policy {
+/**
+ * Loads a policy referenced by a non-builtin `extends` entry. Returns the parsed policy and the directory that
+ * its own relative `extends` resolve against. The Node implementation is `nodePolicyLoader` (./node).
+ */
+export type PolicyLoader = (ref: string, baseDir: string) => { policy: Policy; baseDir: string };
+
+/**
+ * Resolve `extends` recursively. `builtin:*` packs always resolve; file references need a `loader`
+ * (servers receiving policy text usually pass none and reject file extends).
+ */
+export function resolvePolicy(p: Policy, baseDir = ".", loader?: PolicyLoader, depth = 0): Policy {
   if (depth > 8) throw new Error("policy extends chain too deep");
   let acc: Policy = { version: 3, rules: [], redact: [], environments: {} };
   for (const ref of p.extends ?? []) {
@@ -168,35 +175,13 @@ export function resolvePolicy(p: Policy, baseDir: string, loader = readPolicyFil
       if (!pack) throw new Error(`unknown built-in pack "${ref}"`);
       parent = pack;
     } else {
-      const file = path.resolve(baseDir, ref);
-      parent = resolvePolicy(loader(file), path.dirname(file), loader, depth + 1);
+      if (!loader) throw new Error(`cannot resolve extends "${ref}": only builtin:* packs are available here`);
+      const loaded = loader(ref, baseDir);
+      parent = resolvePolicy(loaded.policy, loaded.baseDir, loader, depth + 1);
     }
     acc = mergePolicies(acc, parent);
   }
   return mergePolicies(acc, { ...p, extends: [] });
-}
-
-export function readPolicyFile(file: string): Policy {
-  return parsePolicy(fs.readFileSync(file, "utf8"), file);
-}
-
-/** Find `.copalrules` walking up from `start`. */
-export function findPolicyFile(start: string): string | null {
-  let dir = path.resolve(start);
-  for (;;) {
-    const f = path.join(dir, POLICY_FILE);
-    if (fs.existsSync(f)) return f;
-    const up = path.dirname(dir);
-    if (up === dir) return null;
-    dir = up;
-  }
-}
-
-export function loadPolicy(fileOrDir: string): { policy: Policy; file: string; root: string } {
-  const file = fs.existsSync(fileOrDir) && fs.statSync(fileOrDir).isDirectory() ? findPolicyFile(fileOrDir) : fileOrDir;
-  if (!file || !fs.existsSync(file)) throw new Error(`no ${POLICY_FILE} found from ${fileOrDir}`);
-  const root = path.dirname(file);
-  return { policy: resolvePolicy(readPolicyFile(file), root), file, root };
 }
 
 /** Rules effective in an environment, with overrides applied and `off` rules removed. */

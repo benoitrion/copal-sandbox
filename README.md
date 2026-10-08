@@ -22,7 +22,7 @@ Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout e
 |---|---|
 | `examples/billing-api` | **App cible** : petite API de facturation propre + `.copalrules` + 4 scénarios de violations (`scenarios/`) |
 | `apps/mock-server` | **Backend Copal simulé** : API publique `/v1/*`, console web, faux GitHub et faux GitLab |
-| `packages/core` | Moteur de règles partagé : parser `.copalrules` v3, héritage, environnements, diff, redaction |
+| `packages/core` | Moteur de règles partagé : parser `.copalrules` v3, héritage, environnements, diff, redaction. Publié en module ES unique (Deno/Supabase, navigateur) : voir [`packages/core/README.md`](packages/core/README.md) |
 | `packages/client` | Client HTTP du backend, avec repli sur le moteur local si le serveur est injoignable |
 | `packages/cli` | **Plugin pré-commit** : `copal check`, `copal hook install`, `--fix` |
 | `packages/mcp-server` | **Plugin MCP** pour les agents (6 outils, 2 ressources, 1 prompt) |

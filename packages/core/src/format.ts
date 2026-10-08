@@ -1,6 +1,7 @@
 import type { Finding, Report, Rule } from "./types";
 
-const useColor = () => process.stdout.isTTY && !process.env.NO_COLOR;
+const useColor = () =>
+  typeof process !== "undefined" && !!process.stdout?.isTTY && !process.env?.NO_COLOR;
 const c = (code: number) => (s: string) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s);
 export const red = c(31);
 export const yellow = c(33);

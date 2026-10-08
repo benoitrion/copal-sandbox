@@ -1,7 +1,39 @@
 {
   "name": "@copal/core",
   "version": "0.1.0",
+  "description": "Copal rule engine: .copalrules parser, evaluator and redaction. Isomorphic ESM build for Deno/Supabase Edge and browsers.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benoitrion/copal-sandbox.git",
+    "directory": "packages/core"
+  },
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
-  "dependencies": {}
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./isomorphic": {
+      "types": "./esm/copal-core.d.ts",
+      "import": "./esm/copal-core.mjs",
+      "require": "./dist/src/isomorphic.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/src",
+    "esm",
+    "README.md"
+  ],
+  "scripts": {
+    "build:esm": "node scripts/build-esm.mjs",
+    "check:esm": "node scripts/build-esm.mjs --check"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "^5.6.0"
+  }
 }

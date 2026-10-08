@@ -19,7 +19,9 @@
     "e2e": "bash scripts/e2e.sh",
     "git-app": "node packages/git-app/dist/src/server.js",
     "mcp": "node packages/mcp-server/dist/src/index.js",
-    "copal": "node packages/cli/dist/src/index.js"
+    "copal": "node packages/cli/dist/src/index.js",
+    "build:esm": "npm run build:esm -w packages/core",
+    "check:esm": "npm run check:esm -w packages/core"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

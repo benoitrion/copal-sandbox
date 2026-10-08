@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { evaluate, FileChange, loadPolicy, parsePolicy, Policy, redact, Report, resolvePolicy } from "@copal/core";
+import { evaluate, FileChange, loadPolicy, nodePolicyLoader, parsePolicy, Policy, redact, Report, resolvePolicy } from "@copal/core";
 
 export type Source = "precommit" | "pr" | "mcp" | "ide" | "branch";
 
@@ -131,7 +131,7 @@ export class CopalClient {
         process.stderr.write(`copal: ${(e as Error).message} — falling back to local engine\n`);
       }
     }
-    const policy = localPolicy ?? (req.policyText ? resolvePolicy(parsePolicy(req.policyText), process.cwd()) : undefined);
+    const policy = localPolicy ?? (req.policyText ? resolvePolicy(parsePolicy(req.policyText), process.cwd(), nodePolicyLoader) : undefined);
     if (!policy) throw new CopalApiError("no policy available for local analysis");
     return { ...evaluate(req.files, policy, { environment: req.environment }), mode: "local", project: req.project };
   }

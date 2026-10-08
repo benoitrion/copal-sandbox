@@ -21,14 +21,18 @@ export class YamlError extends Error {
 }
 
 export function parseYaml(source: string): unknown {
+  const lib = optionalYamlLib();
+  return lib ? lib.parse(source) : parseYamlSubset(source);
+}
+
+/** The `yaml` npm package when it is installed (CommonJS Node only); otherwise the built-in subset parser. */
+function optionalYamlLib(): { parse(s: string): unknown } | null {
+  if (typeof require !== "function") return null;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const lib = require("yaml") as { parse(s: string): unknown };
-    return lib.parse(source);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException)?.code !== "MODULE_NOT_FOUND") throw e;
+    return require("yaml") as { parse(s: string): unknown };
+  } catch {
+    return null;
   }
-  return parseYamlSubset(source);
 }
 
 function stripComment(s: string): string {

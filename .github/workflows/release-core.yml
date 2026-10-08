@@ -1,0 +1,50 @@
+name: release-core
+# Publishes the rule engine. Push a tag `core-vX.Y.Z` matching packages/core/package.json.
+#  - GitHub Release with the npm tarball (installable by URL, no registry account needed)
+#  - The tag itself pins the ES module served by jsDelivr:
+#    https://cdn.jsdelivr.net/gh/benoitrion/copal-sandbox@core-vX.Y.Z/packages/core/esm/copal-core.mjs
+on:
+  push:
+    tags: ["core-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - name: Bundle committed at this tag is current
+        run: npm run check:esm
+      - name: Tag matches package version
+        run: |
+          V=$(node -p "require('./packages/core/package.json').version")
+          test "${GITHUB_REF_NAME}" = "core-v$V" || { echo "tag ${GITHUB_REF_NAME} != core-v$V"; exit 1; }
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+      - name: Pack
+        run: npm pack -w packages/core
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CDN="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${GITHUB_REF_NAME}/packages/core/esm"
+          cat > notes.md <<NOTES
+          Copal rule engine **${VERSION}**.
+
+          **Deno / Supabase Edge Functions**
+          \`\`\`ts
+          // @ts-types="${CDN}/copal-core.d.ts"
+          import { evaluate, parsePolicy, resolvePolicy } from "${CDN}/copal-core.mjs";
+          \`\`\`
+
+          **npm (Node, Vite)**: \`npm i https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/copal-core-${VERSION}.tgz\`
+          then \`import { evaluate } from "@copal/core/isomorphic"\` (browser-safe) or \`"@copal/core"\` (Node, with filesystem helpers).
+          NOTES
+          gh release create "$GITHUB_REF_NAME" "copal-core-${VERSION}.tgz" packages/core/esm/copal-core.mjs packages/core/esm/copal-core.d.ts \
+            --title "@copal/core ${VERSION}" --notes-file notes.md
