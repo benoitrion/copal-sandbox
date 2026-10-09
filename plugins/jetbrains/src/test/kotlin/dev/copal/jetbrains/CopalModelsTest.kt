@@ -101,10 +101,10 @@ class CopalModelsTest {
     fun `review output parses into three hint cards with the full ladder and the scope list`() {
         val r = CopalJson.parseReview(reviewJson)
         assertNotNull(r)
-        assertEquals(listOf("hardcoded-credentials", "invoice-contract-test", "ledger-rounding"), r!!.findings.map { it.ruleId }.sorted())
-        r.findings.forEach { assertEquals(it.ruleId, listOf("Ask me", "Explain", "Show me"), ReviewText.actions(it)) }
+        assertEquals(listOf("hardcoded-credentials", "invoice-contract-test", "ledger-rounding"), r!!.findings.orEmpty().map { it.ruleId }.sorted())
+        r.findings.orEmpty().forEach { assertEquals(it.ruleId, listOf("Ask me", "Explain", "Show me"), ReviewText.actions(it)) }
         assertEquals("main", r.base)
-        assertEquals("src/web/settings-page.ts", r.scope.single().file)
+        assertEquals("src/web/settings-page.ts", r.scope.orEmpty().single().file)
         assertNull(CopalJson.parseReview("not json"))
     }
 }
