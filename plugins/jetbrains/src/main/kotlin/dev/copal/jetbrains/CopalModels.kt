@@ -76,6 +76,8 @@ data class AnswersInput(
     val questions: List<NavigatorQuestion>,
     val answers: List<NavigatorAnswer>,
     val skipped: Boolean,
+    /** "What should this change not touch?" — stored as Scope out in .copal/brief.md. */
+    val outOfScope: String? = null,
 )
 
 object CopalJson {
@@ -91,6 +93,17 @@ object CopalJson {
     }
 
     fun answersJson(input: AnswersInput): String = gson.toJson(input)
+
+    /** `copal scope-check --json`. */
+    fun parseScopeCheck(stdout: String): ScopeCheckOutput? {
+        val start = stdout.indexOf("\n{").let { if (it >= 0) it + 1 else if (stdout.trimStart().startsWith("{")) stdout.indexOf('{') else -1 }
+        if (start < 0) return null
+        return try {
+            gson.fromJson(stdout.substring(start), ScopeCheckOutput::class.java)
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     /** `copal review --json` (pretty-printed; warnings may precede it). */
     fun parseReview(stdout: String): ReviewOutput? {
@@ -229,5 +242,40 @@ object ReviewText {
         if (f.coach?.question != null) add("Ask me")
         if (f.why != null || f.coach?.reference != null || f.coach?.example != null) add("Explain")
         if (f.fix != null) add("Show me")
+    }
+}
+
+data class ScopeCheckOutput(val brief: Boolean = false, val base: String? = null, val items: List<ScopeItem>? = emptyList())
+
+data class BriefExample(val text: String, val passing: Boolean)
+
+/** `.copal/brief.md` — the agreed task the AI assistant works from. */
+data class Brief(
+    val task: String,
+    val scopeIn: String?,
+    val scopeOut: String?,
+    val examples: List<BriefExample>,
+    val next: String?,
+) {
+    val progress: String
+        get() = if (examples.isEmpty()) "No examples agreed yet" else "${examples.count { it.passing }} of ${examples.size} examples passing"
+}
+
+/** Same format as `briefToMarkdown` / `parseBriefMarkdown` in @copal/core. */
+object BriefParser {
+    private val checkbox = Regex("""^\s*-\s*\[([ xX])]\s+(.+?)\s*$""")
+
+    fun parse(md: String): Brief {
+        val lines = md.lines()
+        fun field(prefix: String) = lines.firstOrNull { it.trim().startsWith(prefix, ignoreCase = true) }
+            ?.trim()?.substring(prefix.length)?.trim()?.takeIf { it.isNotEmpty() && !it.startsWith("(not stated") }
+        val examples = mutableListOf<BriefExample>()
+        var inExamples = false
+        for (l in lines) {
+            val t = l.trim()
+            if (t.startsWith("## ")) inExamples = t.equals("## Examples", ignoreCase = true)
+            else if (inExamples) checkbox.find(l)?.let { examples.add(BriefExample(it.groupValues[2], it.groupValues[1] != " ")) }
+        }
+        return Brief(field("# Task:") ?: "", field("Scope in:"), field("Scope out:"), examples, field("Next:"))
     }
 }

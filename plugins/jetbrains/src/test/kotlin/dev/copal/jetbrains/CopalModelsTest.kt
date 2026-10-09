@@ -107,4 +107,53 @@ class CopalModelsTest {
         assertEquals("src/web/settings-page.ts", r.scope.orEmpty().single().file)
         assertNull(CopalJson.parseReview("not json"))
     }
+
+    // .copal/brief.md exactly as `copal reflect` writes it (VAT example from the white paper).
+    private val briefMd = """
+        # Task: Add VAT to invoice totals
+
+        Scope in: the total calculation in src/invoice
+        Scope out: the PDF and the database
+
+        ## Examples
+        - [x] 100 EUR net (BE) → 121 EUR gross
+        - [ ] negative amount → error
+        - [ ] unknown country → error
+
+        Done when: every example above passes as a test, existing tests stay green, nothing beyond the examples.
+        Next: make "negative amount → error" pass
+
+        ## How to work
+        - [ ] not an example: lists after "How to work" are ignored
+    """.trimIndent()
+
+    @Test
+    fun `brief parses task, scope, examples with status and next step`() {
+        val b = BriefParser.parse(briefMd)
+        assertEquals("Add VAT to invoice totals", b.task)
+        assertEquals("the total calculation in src/invoice", b.scopeIn)
+        assertEquals("the PDF and the database", b.scopeOut)
+        assertEquals(listOf("100 EUR net (BE) → 121 EUR gross", "negative amount → error", "unknown country → error"), b.examples.map { it.text })
+        assertEquals(listOf(true, false, false), b.examples.map { it.passing })
+        assertEquals("1 of 3 examples passing", b.progress)
+        assertEquals("make \"negative amount → error\" pass", b.next)
+    }
+
+    @Test
+    fun `brief placeholders and an empty file`() {
+        val b = BriefParser.parse("# Task: Rename\n\nScope in: (not stated — ask)\nScope out: (not stated — ask)\n\n## Examples\n- (none agreed yet — ask for the first example)\n")
+        assertNull(b.scopeIn)
+        assertNull(b.scopeOut)
+        assertTrue(b.examples.isEmpty())
+        assertEquals("No examples agreed yet", b.progress)
+        assertEquals("", BriefParser.parse("").task)
+    }
+
+    @Test
+    fun `scope-check output parses (warnings first) and no brief means no items`() {
+        val r = CopalJson.parseScopeCheck("warn\n{\n  \"brief\": true,\n  \"base\": \"main\",\n  \"items\": [{\"file\": \"src/web/settings-page.ts\", \"question\": \"Not in the brief: src/web/settings-page.ts — keep it?\", \"details\": []}]\n}")
+        assertNotNull(r)
+        assertEquals("Not in the brief: src/web/settings-page.ts — keep it?", r!!.items.orEmpty().single().question)
+        assertEquals(false, CopalJson.parseScopeCheck("{\"brief\": false, \"items\": []}")!!.brief)
+    }
 }

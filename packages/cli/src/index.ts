@@ -245,7 +245,13 @@ async function reflect(task: string, flags: Flags): Promise<number> {
 function writeBriefFile(brief: AgentBrief, outOfScope?: string): string | undefined {
   if (brief.skipped) return undefined;
   if (outOfScope?.trim()) brief.scope = { ...(brief.scope ?? {}), out: outOfScope.trim() };
-  const dir = path.join(process.cwd(), ".copal");
+  let root = process.cwd();
+  try {
+    root = repoRoot(root);
+  } catch {
+    /* not a git repo: current folder */
+  }
+  const dir = path.join(root, ".copal");
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "brief.md");
   fs.writeFileSync(file, briefToMarkdown({ ...brief, examples: brief.examples ?? [], scope: brief.scope ?? {} }));

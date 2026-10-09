@@ -13,7 +13,7 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.components.JBLabel
 import com.intellij.ui.content.ContentFactory
 import java.awt.BorderLayout
 import java.awt.datatransfer.StringSelection
@@ -22,34 +22,67 @@ import javax.swing.JButton
 import javax.swing.JPanel
 
 /**
- * "Copal Pair" tool window — navigator mode (strong-style pairing). Before asking an AI assistant to build something,
- * the developer answers up to three questions (first example → failing test, placement, risk); Copal turns the
- * answers into a brief for the assistant: test first, small steps, code where the developer said.
+ * "Copal Task" tool window — the agreed task the AI assistant works from (`.copal/brief.md`): task, scope in / out,
+ * the examples with their status, the next step and the last scope check. Works with any AI assistant through the
+ * brief file; Copal has no AI connection of its own here. Buttons: New task (the navigator), Review my change.
  */
 class CopalPairToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        val area = JBTextArea("Tools → Copal.dev → Pair on a Task… (or the button below) starts a navigator session.\n\n" +
-            "You explain the idea before the AI types it: Copal asks up to 3 questions, then writes the brief for your assistant.").apply {
-            isEditable = false
-            lineWrap = true
-            wrapStyleWord = true
+        val view = JBLabel().apply {
+            verticalAlignment = javax.swing.SwingConstants.TOP
+            border = com.intellij.util.ui.JBUI.Borders.empty(8)
         }
         val panel = JPanel(BorderLayout())
-        panel.add(JBScrollPane(area), BorderLayout.CENTER)
+        panel.add(JBScrollPane(view), BorderLayout.CENTER)
         val buttons = JPanel()
-        buttons.add(JButton("Pair on a task…").apply { addActionListener { CopalPair.start(project) } })
-        buttons.add(JButton("Copy brief").apply {
-            addActionListener { CopyPasteManager.getInstance().setContents(StringSelection(area.text)) }
-        })
+        buttons.add(JButton("New task…").apply { addActionListener { CopalPair.start(project) } })
+        buttons.add(JButton("Review my change").apply { addActionListener { CopalReview.run(project) } })
+        buttons.add(JButton("Refresh").apply { addActionListener { CopalPair.refresh(project) } })
         panel.add(buttons, BorderLayout.SOUTH)
-        toolWindow.contentManager.addContent(ContentFactory.getInstance().createContent(panel, "Navigator", false))
-        CopalPair.areas[project] = area
+        toolWindow.contentManager.addContent(ContentFactory.getInstance().createContent(panel, "Task", false))
+        CopalPair.views[project] = view
+        CopalPair.refresh(project)
     }
 }
 
 object CopalPair {
-    const val TOOL_WINDOW_ID = "Copal Pair"
-    internal val areas = WeakHashMap<Project, JBTextArea>()
+    const val TOOL_WINDOW_ID = "Copal Task"
+    internal val views = WeakHashMap<Project, JBLabel>()
+
+    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    /** HTML for the panel: brief + last scope check. Pure, so it is easy to reason about. */
+    internal fun render(brief: Brief?, scope: ScopeCheckOutput?): String {
+        if (brief == null) return "<html><b>No task yet.</b><br><br>Click <b>New task…</b>: Copal asks for the first example, " +
+            "where the code belongs, what could go wrong and what not to touch, then writes <code>.copal/brief.md</code> " +
+            "for your AI assistant.</html>"
+        val sb = StringBuilder("<html><h3>${esc(brief.task.ifBlank { "Task" })}</h3>")
+        sb.append("<b>In scope:</b> ${esc(brief.scopeIn ?: "not stated")}<br><b>Not to touch:</b> ${esc(brief.scopeOut ?: "not stated")}<br><br>")
+        sb.append("<b>Examples</b> — ${esc(brief.progress)}<br>")
+        brief.examples.forEach { sb.append(if (it.passing) "✓ " else "○ ").append(esc(it.text)).append("<br>") }
+        brief.next?.let { sb.append("<br><b>Next:</b> ${esc(it)}<br>") }
+        val items = scope?.items.orEmpty()
+        sb.append("<br><b>Last scope check</b>${scope?.base?.let { " (vs ${esc(it)})" } ?: ""}<br>")
+        if (scope == null) sb.append("not run yet<br>")
+        else if (items.isEmpty()) sb.append("Everything in this change is covered by the brief.<br>")
+        else items.forEach { sb.append("? ${esc(it.question)}<br>") }
+        return sb.append("</html>").toString()
+    }
+
+    /** Re-reads .copal/brief.md and runs `copal scope-check --json` (local, off the UI thread). */
+    fun refresh(project: Project) {
+        val dir = project.basePath ?: return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val file = java.io.File(dir, ".copal/brief.md")
+            val brief = if (file.isFile) BriefParser.parse(file.readText()) else null
+            val scope = if (brief != null) try {
+                CopalJson.parseScopeCheck(CopalRunner.run(CopalRunner.command(dir, "scope-check", "--json"), timeoutMs = 30_000).stdout)
+            } catch (_: Exception) {
+                null
+            } else null
+            ApplicationManager.getApplication().invokeLater { views[project]?.text = render(brief, scope) }
+        }
+    }
 
     private fun workDir(project: Project, e: AnActionEvent? = null): String? =
         e?.getData(CommonDataKeys.VIRTUAL_FILE)?.let { CopalRunner.findPolicyDir(it)?.path } ?: project.basePath
@@ -73,13 +106,17 @@ object CopalPair {
             return
         }
         val answers = mutableListOf<NavigatorAnswer>()
+        var outOfScope: String? = null
         if (reflect.engage) {
             for ((i, q) in reflect.questions.withIndex()) {
                 val a = Messages.showMultilineInputDialog(project, q.text, "Copal navigator ${i + 1}/${reflect.questions.size} (empty = skip)", "", null, null) ?: break
                 if (a.isNotBlank()) answers.add(NavigatorAnswer(q.id, a.trim()))
             }
+            if (answers.isNotEmpty()) {
+                outOfScope = Messages.showMultilineInputDialog(project, "What should this change not touch?", "Copal navigator — scope (empty = skip)", "", null, null)?.trim()?.ifBlank { null }
+            }
         }
-        val input = AnswersInput(reflect.sessionId, reflect.questions, answers, skipped = answers.isEmpty())
+        val input = AnswersInput(reflect.sessionId, reflect.questions, answers, skipped = answers.isEmpty(), outOfScope = outOfScope)
         object : Task.Backgroundable(project, "Copal: writing the brief", false) {
             override fun run(indicator: ProgressIndicator) {
                 val out = CopalRunner.run(CopalRunner.command(dir, "reflect", task, "--answers", "-"), CopalJson.answersJson(input))
@@ -92,8 +129,8 @@ object CopalPair {
     private fun show(project: Project, brief: String) {
         CopyPasteManager.getInstance().setContents(StringSelection(brief))
         val tw = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
-        tw?.activate({ areas[project]?.text = brief }, true) ?: Messages.showInfoMessage(project, brief, "Copal brief")
-        CopalNotifier.notify(project, "Copal: brief copied — paste it into your AI assistant.")
+        tw?.activate({ refresh(project) }, true) ?: Messages.showInfoMessage(project, brief, "Copal brief")
+        CopalNotifier.notify(project, "Copal: brief saved to .copal/brief.md and copied — your AI assistant can read either.")
     }
 }
 

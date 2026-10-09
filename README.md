@@ -216,6 +216,14 @@ uncommitted edits and new files against `origin/main` / `main` / `master` — an
 content as the PR comments) with **Ask me · Explain · Show me**, plus "Beyond the brief" when `.copal/brief.md` exists.
 Local only, no server call. Terminal: `copal review [--base REF] [--json]`.
 
+## Task panel (IntelliJ)
+
+The **Copal Task** tool window (formerly Copal Pair) shows the current `.copal/brief.md`: task, in scope / not to
+touch, the agreed examples with their status (✓ when ticked `- [x]` in the brief), the next step and the last
+`copal scope-check`. Buttons: **New task…** (the navigator: first example, placement, risk, then what not to touch —
+writes the brief at the repository root), **Review my change**, **Refresh**. Copal has no AI connection of its own
+here: any assistant works from the brief file.
+
 ## Dashboard data (what feeds each page)
 
 Everything is best effort (never blocks) and only sent when a Copal server is configured.
