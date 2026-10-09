@@ -264,3 +264,42 @@ export function applicableRules(policy: Policy, filePath: string | undefined, en
     return inScope(p, r.paths, r.exclude);
   });
 }
+
+// ---------------------------------------------------------------- tests first (commit order)
+export interface CommitFiles {
+  sha: string;
+  /** Paths touched by the commit. */
+  files: string[];
+}
+
+/**
+ * Tests-first check for the PR/CI path: for every requireTest rule, an implementation file whose first commit on the
+ * branch comes before the first commit of its test. Always audit (never blocks), phrased as a question; the rule's
+ * coaching (explanation, reference, kata) stays attached for the ladder. `commits` is oldest first.
+ */
+export function testOrderFindings(policy: Policy, commits: CommitFiles[], environment = "ci"): Finding[] {
+  const first = new Map<string, number>();
+  commits.forEach((c, i) => c.files.map(normalizePath).forEach((p) => first.has(p) || first.set(p, i)));
+  const paths = [...first.keys()];
+  const out: Finding[] = [];
+  for (const rule of effectiveRules(policy, environment).filter((r) => r.requireTest)) {
+    for (const p of paths) {
+      if (/\.(test|spec)\.[jt]sx?$/.test(p) || p.includes("/__tests__/") || !inScope(p, rule.paths, rule.exclude)) continue;
+      const expected = rule.requireTest!.test.replace(/\{dir\}/g, posix.dirname(p)).replace(/\{name\}/g, posix.basename(p).replace(/\.[^.]+$/, ""));
+      const testPath = paths.find((t) => matchGlob(t, expected));
+      if (!testPath) continue;
+      const code = first.get(p)!;
+      const tst = first.get(testPath)!;
+      if (code >= tst) continue;
+      const question = `Was the test for ${posix.basename(p)} written after the code? It came in ${commits[tst].sha.slice(0, 7)}, the code in ${commits[code].sha.slice(0, 7)}. Next time, which example could you write as a failing test first?`;
+      out.push({
+        ...base(rule, p, 1, question, "testing", "info"),
+        message: question,
+        mode: "audit",
+        blocking: false,
+        coach: { ...(rule.coach ?? {}), question: rule.coach?.question ?? "Which example would you write as a failing test before the code?" },
+      });
+    }
+  }
+  return out;
+}

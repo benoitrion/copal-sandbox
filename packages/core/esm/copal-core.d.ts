@@ -245,6 +245,17 @@ export interface RedactionResult {
 export declare function redact(text: string, policy?: Policy): RedactionResult;
 /** Rules that apply to a given path — what Copal MCP hands to agents before they write code. */
 export declare function applicableRules(policy: Policy, filePath: string | undefined, environment?: string): Rule[];
+export interface CommitFiles {
+    sha: string;
+    /** Paths touched by the commit. */
+    files: string[];
+}
+/**
+ * Tests-first check for the PR/CI path: for every requireTest rule, an implementation file whose first commit on the
+ * branch comes before the first commit of its test. Always audit (never blocks), phrased as a question; the rule's
+ * coaching (explanation, reference, kata) stays attached for the ladder. `commits` is oldest first.
+ */
+export declare function testOrderFindings(policy: Policy, commits: CommitFiles[], environment?: string): Finding[];
 
 // ---- format
 export declare const red: (s: string) => string;

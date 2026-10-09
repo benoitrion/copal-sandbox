@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
-import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges } from "./git";
+import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges, branchCommits } from "./git";
 
 const HELP = `copal — Copal pre-commit & policy CLI (sandbox)
 
@@ -111,6 +111,16 @@ async function check(flags: Flags): Promise<number> {
     },
     repo.policy,
   );
+  if (flags.base) {
+    // Tests first: implementation committed before its test on this branch → audit question (never blocks).
+    const order = testOrderFindings(repo.policy, branchCommits(root, String(flags.base)), environment);
+    if (order.length) {
+      result.findings.push(...order);
+      result.summary.total += order.length;
+      result.summary.audit += order.length;
+      result.summary.byCategory.testing = (result.summary.byCategory.testing ?? 0) + order.length;
+    }
+  }
 
   const showMe = !!flags["show-me"] || !!flags.fix;
   if (flags.json) console.log(JSON.stringify(result, null, 2));

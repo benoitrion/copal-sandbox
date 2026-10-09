@@ -75,6 +75,19 @@ $GITAPP simulate --provider gitlab --dir . --base main --head HEAD --repo acme/b
 [ "$(state github 248)" = success ] && ok "GitHub #248 re-checked → success" || ko "github 248 should pass"
 [ "$(state gitlab 12)" = success ] && ok "GitLab !12 re-checked → success" || ko "gitlab 12 should pass"
 
+step "Tests first: commit order on the branch (copal check --base)"
+PREV=$(git rev-parse --abbrev-ref HEAD)
+order() { $COPAL check --base main --json --local --env ci 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);console.log((r.findings||[]).filter(f=>/written after the code/.test(f.message)&&!f.blocking).length)})"; }
+git checkout -q main && git checkout -q -b tests-first
+printf 'export const vatRate = 0.21;\n' > src/invoice/vat.test.ts; git add -A; git commit -qm "test: vat" --no-verify
+printf 'export const vatRate = 0.21;\n' > src/invoice/vat.ts; git add -A; git commit -qm "feat: vat" --no-verify
+[ "$(order)" = 0 ] && ok "test committed before code → clean" || ko "test-first branch should be clean"
+git checkout -q main && git checkout -q -b code-first
+printf 'export const vatRate = 0.21;\n' > src/invoice/vat.ts; git add -A; git commit -qm "feat: vat" --no-verify
+printf 'export const vatRate = 0.21;\n' > src/invoice/vat.test.ts; git add -A; git commit -qm "test: vat" --no-verify
+[ "$(order)" = 1 ] && ok "code committed before test → one audit question" || ko "code-first branch should give one audit finding (got $(order))"
+git checkout -q "$PREV" && git branch -q -D tests-first code-first
+
 step "Scope check against the brief (.copal/brief.md)"
 PREV=$(git rev-parse --abbrev-ref HEAD); git checkout -q main && git checkout -q -b scope-demo
 mkdir -p .copal src/web && cat > .copal/brief.md <<'BRIEF'

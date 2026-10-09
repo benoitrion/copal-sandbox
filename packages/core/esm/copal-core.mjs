@@ -1457,6 +1457,32 @@ function applicableRules(policy, filePath, environment = "local") {
     return inScope(p, r.paths, r.exclude);
   });
 }
+function testOrderFindings(policy, commits, environment = "ci") {
+  const first = /* @__PURE__ */ new Map();
+  commits.forEach((c2, i) => c2.files.map(normalizePath).forEach((p) => first.has(p) || first.set(p, i)));
+  const paths = [...first.keys()];
+  const out = [];
+  for (const rule of effectiveRules(policy, environment).filter((r) => r.requireTest)) {
+    for (const p of paths) {
+      if (/\.(test|spec)\.[jt]sx?$/.test(p) || p.includes("/__tests__/") || !inScope(p, rule.paths, rule.exclude)) continue;
+      const expected = rule.requireTest.test.replace(/\{dir\}/g, dirname(p)).replace(/\{name\}/g, basename(p).replace(/\.[^.]+$/, ""));
+      const testPath = paths.find((t) => matchGlob(t, expected));
+      if (!testPath) continue;
+      const code = first.get(p);
+      const tst = first.get(testPath);
+      if (code >= tst) continue;
+      const question = `Was the test for ${basename(p)} written after the code? It came in ${commits[tst].sha.slice(0, 7)}, the code in ${commits[code].sha.slice(0, 7)}. Next time, which example could you write as a failing test first?`;
+      out.push({
+        ...base(rule, p, 1, question, "testing", "info"),
+        message: question,
+        mode: "audit",
+        blocking: false,
+        coach: { ...rule.coach ?? {}, question: rule.coach?.question ?? "Which example would you write as a failing test before the code?" }
+      });
+    }
+  }
+  return out;
+}
 
 // src/format.ts
 var useColor = () => typeof process !== "undefined" && !!process.stdout?.isTTY && !process.env?.NO_COLOR;
@@ -1784,6 +1810,7 @@ export {
   scalar,
   scopeCheck,
   taskScope,
+  testOrderFindings,
   toYaml,
   validatePolicy,
   yellow

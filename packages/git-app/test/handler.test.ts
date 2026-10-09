@@ -51,3 +51,31 @@ test("PR summary lists what goes beyond .copal/brief.md (never changes the statu
   const withFinding = await run([file("src/web/settings-page.ts", "export function renderSettingsPage() {}")], [{ ruleId: "x", file: "src/web/settings-page.ts", line: 1 }]);
   assert.match(withFinding.review!, /Not in the brief/);
 });
+
+test("PR check adds a tests-first audit question when code was committed before its test", async () => {
+  const { runCheck } = require("../src/handler");
+  const policyText = 'version: 4\nrules:\n  - id: invoice-contract-test\n    category: testing\n    mode: enforce\n    paths: ["src/invoice/*.ts"]\n    requireTest:\n      test: "src/invoice/{name}.test.ts"\n';
+  const run = async (commits: { sha: string; files: string[] }[]) => {
+    let findings: { ruleId: string; blocking: boolean; message: string }[] = [];
+    let status = "";
+    const provider = {
+      name: "github",
+      label: "acme/billing-api#10",
+      load: async () => ({ files: [], headSha: "abc", title: "VAT", author: "ana", policyText, ref: "acme/billing-api#10" }),
+      commits: async () => commits,
+      setStatus: async (_s: string, state: string) => void (status = state),
+      postReview: async (_s: string, r: { findings: typeof findings }) => void (findings = r.findings),
+      comment: async () => undefined,
+    };
+    const client = { analyze: async () => ({ findings: [], blocking: false, summary: { total: 0, blocking: 0, audit: 0, byCategory: {} }, environment: "ci", mode: "local" }) };
+    await runCheck(provider, client);
+    return { findings, status };
+  };
+  const clean = await run([{ sha: "t1", files: ["src/invoice/vat.test.ts"] }, { sha: "c1", files: ["src/invoice/vat.ts"] }]);
+  assert.deepEqual(clean.findings, []);
+  const late = await run([{ sha: "c1aaaaa", files: ["src/invoice/vat.ts"] }, { sha: "t1bbbbb", files: ["src/invoice/vat.test.ts"] }]);
+  assert.equal(late.findings.length, 1);
+  assert.equal(late.findings[0].blocking, false);
+  assert.match(late.findings[0].message, /written after the code\?/);
+  assert.equal(late.status, "success", "audit only");
+});

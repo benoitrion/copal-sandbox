@@ -1,6 +1,6 @@
 import * as crypto from "node:crypto";
 import { CopalClient } from "@copal/client";
-import { reportToMarkdown, scopeCheck } from "@copal/core";
+import { parsePolicy, reportToMarkdown, resolvePolicy, scopeCheck, testOrderFindings } from "@copal/core";
 import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider, ChangeSet } from "./providers";
 import { COMMAND_RX, runCommand } from "./commands";
 
@@ -51,6 +51,20 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       files: cs.files,
       policyText: cs.policyText,
     });
+    if (provider.commits) {
+      try {
+        // Tests first: code committed before its test on this PR → audit question (never changes the status).
+        const order = testOrderFindings(resolvePolicy(parsePolicy(cs.policyText)), await provider.commits(), process.env.COPAL_ENV ?? "ci");
+        if (order.length) {
+          result.findings.push(...order);
+          result.summary.total += order.length;
+          result.summary.audit += order.length;
+          result.summary.byCategory.testing = (result.summary.byCategory.testing ?? 0) + order.length;
+        }
+      } catch (e) {
+        log(`${provider.label}: commit order unavailable (${(e as Error).message})`);
+      }
+    }
     // project name comes from the policy itself when the server parses it
     if (result.analysisId) lastAnalysis.set(provider.label, result.analysisId);
     const desc = result.blocking

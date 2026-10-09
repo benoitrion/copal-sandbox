@@ -200,6 +200,14 @@ cover ("Not in the brief: src/web/settings-page.ts — keep it?"), and about any
 always exits 0. When a repository has `.copal/brief.md`, the PR bot adds the same list to its review summary under
 "Beyond the agreed brief" (a comment when there are no findings); the status check is unchanged.
 
+## Tests first (commit order)
+
+For `requireTest` rules, `copal check --base REF` and the PR bot (GitHub and GitLab) also look at the order of the
+branch's commits. When an implementation file was committed before its test, they add one **audit** finding (never
+blocking, even when the rule is enforced), phrased as a question: "Was the test for vat.ts written after the code? …
+Next time, which example could you write as a failing test first?" The rule's coaching (explanation, reference,
+kata) stays attached. Test and code in the same commit, or the test first, is clean.
+
 ## Hint data (growth)
 
 Every plugin records hint-ladder steps with `POST /v1/coach/events` (best effort, never blocks): VS Code directly,

@@ -22,6 +22,8 @@ export interface GitProvider {
   setStatus(sha: string, state: CheckState, description: string): Promise<void>;
   postReview(sha: string, report: Report, findings: Finding[], extraMarkdown?: string): Promise<void>;
   comment(body: string): Promise<void>;
+  /** Commits of the PR/MR, oldest first, with the paths each touched (tests-first check). Optional, best effort. */
+  commits?(): Promise<{ sha: string; files: string[] }[]>;
 }
 
 async function http(url: string, init: RequestInit & { accept?: string } = {}): Promise<Response> {
@@ -117,6 +119,15 @@ export class GitHubProvider implements GitProvider {
     return { files, headSha: sha, title: pr.title, author: pr.user?.login ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), ref: `${this.repo}#${this.number}` };
   }
 
+  async commits(): Promise<{ sha: string; files: string[] }[]> {
+    const headers = await this.h();
+    const list = (await (await http(this.api(`/pulls/${this.number}/commits?per_page=100`), { headers })).json()) as any[];
+    return mapLimit(list, 6, async (c) => {
+      const d = (await (await http(this.api(`/commits/${c.sha}`), { headers })).json()) as any;
+      return { sha: c.sha as string, files: ((d.files ?? []) as any[]).map((f) => f.filename as string) };
+    });
+  }
+
   async setStatus(sha: string, state: CheckState, description: string) {
     await http(this.api(`/statuses/${sha}`), {
       method: "POST",
@@ -210,6 +221,15 @@ export class GitLabProvider implements GitProvider {
       .join("\n");
     const files = await mapLimit(parseUnifiedDiff(diff), 6, async (f) => ({ ...f, content: f.status === "deleted" ? undefined : await read(f.path) }));
     return { files, headSha: sha, title: mr.title, author: mr.author?.username ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), ref: this.label };
+  }
+
+  async commits(): Promise<{ sha: string; files: string[] }[]> {
+    const headers = this.h();
+    const list = ((await (await http(this.api(`/merge_requests/${this.iid}/commits?per_page=100`), { headers })).json()) as any[]).reverse();
+    return mapLimit(list, 6, async (c) => {
+      const d = (await (await http(this.api(`/repository/commits/${c.id}/diff`), { headers })).json()) as any[];
+      return { sha: c.id as string, files: d.map((f) => f.new_path as string) };
+    });
   }
 
   async setStatus(sha: string, state: CheckState, description: string) {

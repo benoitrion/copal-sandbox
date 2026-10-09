@@ -53,6 +53,18 @@ export function defaultBase(root: string, given?: string): string {
   return "HEAD";
 }
 
+/** Commits of the branch since base, oldest first, with the paths each one touched. */
+export function branchCommits(root: string, base: string): { sha: string; files: string[] }[] {
+  const out = tryGit(["log", "--reverse", "--no-merges", "--name-only", "--format=%x01%H", `${base}..HEAD`], root) ?? "";
+  return out
+    .split("\x01")
+    .filter((b) => b.trim())
+    .map((b) => {
+      const [sha, ...files] = b.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+      return { sha, files };
+    });
+}
+
 /** Every tracked file as fully added (full branch analysis). */
 export function allTrackedFiles(root: string, filter = /\.(ts|tsx|js|jsx|mjs|cjs|json|ya?ml|py|go|java)$/): FileChange[] {
   return git(["ls-files"], root)
