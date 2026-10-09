@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import { CopalClient } from "@copal/client";
-import { reportToMarkdown } from "@copal/core";
-import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider } from "./providers";
+import { reportToMarkdown, scopeCheck } from "@copal/core";
+import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider, ChangeSet } from "./providers";
 import { COMMAND_RX, runCommand } from "./commands";
 
 const lastAnalysis = new Map<string, string>(); // PR label -> analysisId (for /copal feedback)
@@ -23,6 +23,14 @@ export function verifyGitLabToken(secret: string | undefined, header: string | u
 }
 
 const log = (...a: unknown[]) => console.log(`[copal-git-app] ${new Date().toISOString()}`, ...a);
+
+/** What the change adds beyond `.copal/brief.md`, as questions (undefined when there is no brief or nothing to ask). */
+function scopeMarkdown(cs: ChangeSet): string | undefined {
+  if (!cs.briefText) return undefined;
+  const items = scopeCheck(cs.briefText, cs.files);
+  if (!items.length) return undefined;
+  return ["#### Beyond the agreed brief", "", ...items.map((i) => `- ${i.question}${i.details.length ? ` _(${i.details.join(", ")})_` : ""}`)].join("\n");
+}
 
 /** Analyze one PR/MR and publish results natively in the Git provider. */
 export async function runCheck(provider: GitProvider, client = new CopalClient()) {
@@ -50,18 +58,19 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       : result.findings.length
         ? `Passed with ${result.summary.audit} audit finding(s)`
         : "Passed — no findings";
+    const scope = scopeMarkdown(cs);
     if (result.findings.length) {
       // GitHub/GitLab reject the whole review if an inline comment targets a line outside the diff:
       // inline only findings on added lines; every finding is still listed in the review summary.
       const inDiff = new Set(cs.files.flatMap((f) => f.addedLines.map((l) => `${f.path}:${l.line}`)));
       const inline = result.findings.filter((f) => inDiff.has(`${f.file}:${f.line}`));
       try {
-        await provider.postReview(cs.headSha, result, inline);
+        await provider.postReview(cs.headSha, result, inline, scope);
       } catch (e) {
         log(`${provider.label} review failed (${(e as Error).message}); posting a summary comment instead`);
-        await provider.comment(reportToMarkdown(result));
+        await provider.comment(reportToMarkdown(result) + (scope ? `\n\n${scope}` : ""));
       }
-    }
+    } else if (scope) await provider.comment(scope);
     await provider.setStatus(cs.headSha, result.blocking ? "failure" : "success", desc);
     log(`${provider.label} → ${desc}`);
     return result;

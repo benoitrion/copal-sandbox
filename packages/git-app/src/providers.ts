@@ -8,6 +8,8 @@ export interface ChangeSet {
   title: string;
   author: string;
   policyText?: string;
+  /** `.copal/brief.md` at the head, when the repository has one. */
+  briefText?: string;
   ref: string;
 }
 
@@ -18,7 +20,7 @@ export interface GitProvider {
   readonly label: string; // "acme/billing-api#248"
   load(): Promise<ChangeSet>;
   setStatus(sha: string, state: CheckState, description: string): Promise<void>;
-  postReview(sha: string, report: Report, findings: Finding[]): Promise<void>;
+  postReview(sha: string, report: Report, findings: Finding[], extraMarkdown?: string): Promise<void>;
   comment(body: string): Promise<void>;
 }
 
@@ -112,7 +114,7 @@ export class GitHubProvider implements GitProvider {
       }
     };
     const files = await mapLimit(parseUnifiedDiff(diff), 6, async (f) => ({ ...f, content: f.status === "deleted" ? undefined : await read(f.path) }));
-    return { files, headSha: sha, title: pr.title, author: pr.user?.login ?? "unknown", policyText: await read(".copalrules"), ref: `${this.repo}#${this.number}` };
+    return { files, headSha: sha, title: pr.title, author: pr.user?.login ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), ref: `${this.repo}#${this.number}` };
   }
 
   async setStatus(sha: string, state: CheckState, description: string) {
@@ -123,14 +125,14 @@ export class GitHubProvider implements GitProvider {
     });
   }
 
-  async postReview(sha: string, report: Report, findings: Finding[]) {
+  async postReview(sha: string, report: Report, findings: Finding[], extraMarkdown?: string) {
     await http(this.api(`/pulls/${this.number}/reviews`), {
       method: "POST",
       headers: await this.h(),
       body: JSON.stringify({
         commit_id: sha,
         event: report.blocking ? "REQUEST_CHANGES" : "COMMENT",
-        body: reportToMarkdown(report),
+        body: reportToMarkdown(report) + (extraMarkdown ? `\n\n${extraMarkdown}` : ""),
         comments: findings.map((f) => ({ path: f.file, line: f.line, side: "RIGHT", body: findingToMarkdown(f, { referenceBase: this.blobBase(sha) }) })),
       }),
     });
@@ -207,7 +209,7 @@ export class GitLabProvider implements GitProvider {
       .map((c) => `diff --git a/${c.old_path} b/${c.new_path}\n${c.new_file ? "new file mode 100644\n" : ""}${c.deleted_file ? "deleted file mode 100644\n" : ""}--- ${c.new_file ? "/dev/null" : "a/" + c.old_path}\n+++ ${c.deleted_file ? "/dev/null" : "b/" + c.new_path}\n${c.diff}`)
       .join("\n");
     const files = await mapLimit(parseUnifiedDiff(diff), 6, async (f) => ({ ...f, content: f.status === "deleted" ? undefined : await read(f.path) }));
-    return { files, headSha: sha, title: mr.title, author: mr.author?.username ?? "unknown", policyText: await read(".copalrules"), ref: this.label };
+    return { files, headSha: sha, title: mr.title, author: mr.author?.username ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), ref: this.label };
   }
 
   async setStatus(sha: string, state: CheckState, description: string) {
@@ -233,7 +235,7 @@ export class GitLabProvider implements GitProvider {
     return d.notes[0];
   }
 
-  async postReview(_sha: string, report: Report, findings: Finding[]) {
+  async postReview(_sha: string, report: Report, findings: Finding[], extraMarkdown?: string) {
     for (const f of findings) {
       await http(this.api(`/merge_requests/${this.iid}/discussions`), {
         method: "POST",
@@ -244,7 +246,7 @@ export class GitLabProvider implements GitProvider {
         }),
       });
     }
-    await this.comment(reportToMarkdown(report));
+    await this.comment(reportToMarkdown(report) + (extraMarkdown ? `\n\n${extraMarkdown}` : ""));
   }
 
   async comment(body: string) {

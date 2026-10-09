@@ -189,6 +189,17 @@ not touch, then writes `.copal/brief.md`: task, scope in / out, 2–4 examples (
 `sync-context` block tell the AI: write the examples as failing tests, show them, wait for the developer's OK, then
 implement in small steps until they pass — nothing beyond the examples.
 
+## Assumptions and scope check
+
+The brief, the Claude Code hook and the `sync-context` block ask the AI to end every task with two lists:
+*Assumptions I made that you didn't state* and *Things I added beyond the agreed examples*.
+
+`copal scope-check [--base REF] [--json]` compares your change (branch + uncommitted + new files, against `origin/main`,
+`main` or `master` by default) with `.copal/brief.md` and asks about new files, exports and endpoints the brief does not
+cover ("Not in the brief: src/web/settings-page.ts — keep it?"), and about anything the brief says not to touch. It
+always exits 0. When a repository has `.copal/brief.md`, the PR bot adds the same list to its review summary under
+"Beyond the agreed brief" (a comment when there are no findings); the status check is unchanged.
+
 ## Hint data (growth)
 
 Every plugin records hint-ladder steps with `POST /v1/coach/events` (best effort, never blocks): VS Code directly,

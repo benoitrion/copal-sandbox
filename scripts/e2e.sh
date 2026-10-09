@@ -75,6 +75,26 @@ $GITAPP simulate --provider gitlab --dir . --base main --head HEAD --repo acme/b
 [ "$(state github 248)" = success ] && ok "GitHub #248 re-checked → success" || ko "github 248 should pass"
 [ "$(state gitlab 12)" = success ] && ok "GitLab !12 re-checked → success" || ko "gitlab 12 should pass"
 
+step "Scope check against the brief (.copal/brief.md)"
+PREV=$(git rev-parse --abbrev-ref HEAD); git checkout -q main && git checkout -q -b scope-demo
+mkdir -p .copal src/web && cat > .copal/brief.md <<'BRIEF'
+# Task: Add VAT to invoice totals
+
+Scope in: the total calculation in src/invoice
+Scope out: the PDF and the database
+
+## Examples
+- [ ] 100 EUR net (BE) → 121 EUR gross
+- [ ] negative amount → error
+BRIEF
+printf 'export function vatFor(country: string, net: number) { return net * 0.21; }\n' > src/invoice/vat.ts
+SC=$($COPAL scope-check --base main --json)
+echo "$SC" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.exit(JSON.parse(s).items.length===0?0:1))" && ok "VAT-only change: nothing beyond the brief" || ko "VAT-only should list nothing: $SC"
+printf 'export function renderSettingsPage() {}\n' > src/web/settings-page.ts
+SC=$($COPAL scope-check --base main --json); rc=$?
+echo "$SC" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const i=JSON.parse(s).items;process.exit(i.length===1&&i[0].file==='src/web/settings-page.ts'?0:1)})" && [ $rc = 0 ] && ok "settings page listed as 'Not in the brief — keep it?' (exit 0)" || ko "settings page should be listed: $SC"
+rm -rf .copal src/web src/invoice/vat.ts && git checkout -q "$PREV" && git branch -q -D scope-demo
+
 step "Hint data for the dashboard (JetBrains events, Claude Code request check)"
 $COPAL event no-float-money 1 shown --category quality --source ide --json >/dev/null
 $COPAL event no-float-money 1 answered --category quality --source ide --json >/dev/null

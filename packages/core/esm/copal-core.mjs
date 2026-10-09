@@ -471,11 +471,13 @@ function buildBrief(policy, task, questions, answers, skipped = false, opts = {}
     brief.location ? `Put the logic where the developer said: ${brief.location}.` : "Ask the developer where the logic belongs before creating new modules.",
     ...brief.edgeCases.map((e) => `Add a test for: ${e}.`),
     "Work in small steps: one test at a time, run the tests after each step, stop and ask when a design choice is not covered.",
-    "Respect the Copal rules listed in the brief; explain any rule you think should not apply instead of working around it."
+    "Respect the Copal rules listed in the brief; explain any rule you think should not apply instead of working around it.",
+    REPORT_RULE
   ];
   return brief;
 }
 var EXAMPLES_FIRST = "Write the agreed examples as failing tests first, show them, and wait for the developer's OK before implementing. Then implement in small steps until they pass \u2014 nothing beyond the examples.";
+var REPORT_RULE = "End every task with two lists: Assumptions I made that you didn't state, and Things I added beyond the agreed examples.";
 function briefToMarkdown(b) {
   const out = [`# Task: ${b.task}`, ""];
   out.push(`Scope in: ${b.scope.in ?? "(not stated \u2014 ask)"}`, `Scope out: ${b.scope.out ?? "(not stated \u2014 ask)"}`, "", "## Examples");
@@ -506,8 +508,8 @@ function ruleSummary(r) {
 }
 function draftRuleFromReview(input) {
   const text = input.text.replace(/^\s*\/copal\s+rule\b[:\s]*/i, "").replace(/\s+/g, " ").trim();
-  const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
-  const id = (words.slice(0, 4).join("-") || "review-rule").slice(0, 48);
+  const words2 = text.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
+  const id = (words2.slice(0, 4).join("-") || "review-rule").slice(0, 48);
   const dir = input.path && input.path.includes("/") ? input.path.slice(0, input.path.lastIndexOf("/")) : void 0;
   const sentence = text.replace(/[.!]+$/, "");
   const question = /\?\s*$/.test(text) ? text : `Before you write this: ${sentence.charAt(0).toLowerCase() + sentence.slice(1)} \u2014 how does your change handle that?`;
@@ -564,6 +566,7 @@ function agentContextBlock(policy, project) {
     "### How to work",
     "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong.",
     `- ${EXAMPLES_FIRST}`,
+    `- ${REPORT_RULE}`,
     "- If `.copal/brief.md` exists, it holds the agreed task, scope and examples.",
     "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
     CONTEXT_END
@@ -1649,7 +1652,7 @@ function requestCheckContext(prompt, brief) {
     `Question: ${QUESTIONS[gap]}`
   ];
   if (next) lines.push("Offer these options:", `1. ${next}`, "2. Something else (they describe it)");
-  lines.push(`Then: ${EXAMPLES_FIRST}`);
+  lines.push(`Then: ${EXAMPLES_FIRST}`, REPORT_RULE);
   lines.push('If the developer says "just do it" or "skip", proceed without asking.');
   return lines.join("\n");
 }
@@ -1657,6 +1660,63 @@ function requestCheckEvent(prompt) {
   if (BYPASS.test(prompt)) return null;
   const gap = requestGaps(prompt)[0];
   return gap ? { ruleId: `request-${gap}`, category: "requests", levelReached: 1, action: "shown" } : null;
+}
+
+// src/scope.ts
+var NOT_STATED = /^\(not stated/i;
+function parseBriefMarkdown(md) {
+  const line = (rx) => md.match(rx)?.[1]?.trim();
+  const keep = (s) => s && !NOT_STATED.test(s) ? s : void 0;
+  const examples = [...md.matchAll(/^\s*-\s*\[([ xX])\]\s+(.+?)\s*$/gm)].map((m) => ({ text: m[2], done: m[1] !== " " }));
+  const scope = {};
+  const sin = keep(line(/^Scope in:\s*(.+)$/im));
+  const sout = keep(line(/^Scope out:\s*(.+)$/im));
+  if (sin) scope.in = sin;
+  if (sout) scope.out = sout;
+  return { task: line(/^#\s*Task:\s*(.+)$/im) ?? "", scope, examples, next: line(/^Next:\s*(.+)$/im) };
+}
+var STOP2 = new Set(
+  "the and for with from into onto that this then than when what which should must only not don dont touch change changes add adds added new make pass passes error errors test tests spec specs src lib main app index java kotlin ts tsx js jsx mjs cjs kt py go rb cs".split(" ")
+);
+function words(s) {
+  return s.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).map((w) => w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w).filter((w) => w.length >= 3 && !STOP2.has(w) && !/^\d+$/.test(w));
+}
+var EXPORT = /^\s*(?:export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)|(?:public\s+)?(?:fun|class|object|interface)\s+([A-Za-z_][\w]*))/;
+var ENDPOINT = /\b(?:router|app|server|route[rs]?)\.(get|post|put|patch|delete)\(\s*['"`]([^'"`]+)['"`]|@(Get|Post|Put|Patch|Delete)Mapping\(\s*(?:value\s*=\s*)?["']([^"']+)["']/i;
+function newSymbols(c2) {
+  const exports = [];
+  const endpoints = [];
+  for (const { text } of c2.addedLines) {
+    const e = text.match(EXPORT);
+    if (e) exports.push(e[1] ?? e[2]);
+    const p = text.match(ENDPOINT);
+    if (p) endpoints.push(`${(p[1] ?? p[3]).toUpperCase()} ${p[2] ?? p[4]}`);
+  }
+  return { exports, endpoints };
+}
+function scopeCheck(briefMd, changes) {
+  const b = parseBriefMarkdown(briefMd);
+  const vocab = new Set(words([b.task, b.scope.in ?? "", ...b.examples.map((e) => e.text)].join(" ")));
+  const outWords = new Set(words(b.scope.out ?? ""));
+  const hits = (ws, set) => ws.some((w) => set.has(w));
+  const items = [];
+  for (const c2 of changes) {
+    if (c2.status === "deleted" || c2.path.startsWith(".copal/")) continue;
+    const pathWords = words(c2.path);
+    const { exports, endpoints } = newSymbols(c2);
+    const details = [...exports.map((e) => `new export ${e}`), ...endpoints.map((e) => `new endpoint ${e}`)];
+    if (b.scope.out && hits(pathWords, outWords)) {
+      items.push({ file: c2.path, question: `${c2.path}: the brief says not to touch "${b.scope.out}" \u2014 is this change needed?`, details });
+      continue;
+    }
+    if (!hits(pathWords, vocab)) {
+      items.push({ file: c2.path, question: `Not in the brief: ${c2.path} \u2014 keep it?`, details });
+      continue;
+    }
+    const extra = [...exports.filter((e) => !hits(words(e), vocab)).map((e) => `new export ${e}`), ...endpoints.filter((e) => !hits(words(e), vocab)).map((e) => `new endpoint ${e}`)];
+    if (extra.length) items.push({ file: c2.path, question: `Not in the brief: ${extra.join(", ")} in ${c2.path} \u2014 keep it?`, details: extra });
+  }
+  return items;
 }
 export {
   AGENT_CONTEXT_TARGETS,
@@ -1668,6 +1728,7 @@ export {
   HINT_LEVELS,
   LATE_SOURCES,
   POLICY_FILE,
+  REPORT_RULE,
   SMELL_DEFAULTS,
   SUPPORTED_VERSIONS,
   YamlError,
@@ -1701,6 +1762,7 @@ export {
   mergePolicies,
   navigatorQuestions,
   normalizePath,
+  parseBriefMarkdown,
   parseDeny,
   parsePolicy,
   parseUnifiedDiff,
@@ -1720,6 +1782,7 @@ export {
   rulesToGuidance,
   rulesWithoutCoaching,
   scalar,
+  scopeCheck,
   taskScope,
   toYaml,
   validatePolicy,

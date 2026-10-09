@@ -241,6 +241,7 @@ export function buildBrief(policy: Policy | undefined, task: string, questions: 
     ...brief.edgeCases.map((e) => `Add a test for: ${e}.`),
     "Work in small steps: one test at a time, run the tests after each step, stop and ask when a design choice is not covered.",
     "Respect the Copal rules listed in the brief; explain any rule you think should not apply instead of working around it.",
+    REPORT_RULE,
   ];
   return brief;
 }
@@ -248,6 +249,10 @@ export function buildBrief(policy: Policy | undefined, task: string, questions: 
 /** The examples-first rule, shared by the brief, the Claude Code hook and the sync-context block. */
 export const EXAMPLES_FIRST =
   "Write the agreed examples as failing tests first, show them, and wait for the developer's OK before implementing. Then implement in small steps until they pass — nothing beyond the examples.";
+
+/** The end-of-task report, shared by the brief, the Claude Code hook and the sync-context block. */
+export const REPORT_RULE =
+  "End every task with two lists: Assumptions I made that you didn't state, and Things I added beyond the agreed examples.";
 
 /** The brief as `.copal/brief.md` — read by any AI assistant, the hook (`Next:`) and the IDE task panel. */
 export function briefToMarkdown(b: AgentBrief): string {
@@ -369,6 +374,7 @@ export function agentContextBlock(policy: Policy, project?: string): string {
     "### How to work",
     "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong.",
     `- ${EXAMPLES_FIRST}`,
+    `- ${REPORT_RULE}`,
     "- If `.copal/brief.md` exists, it holds the agreed task, scope and examples.",
     "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
     CONTEXT_END,

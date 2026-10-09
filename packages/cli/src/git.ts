@@ -29,6 +29,30 @@ export function branchChanges(root: string, base: string): FileChange[] {
   return parseUnifiedDiff(diff).map((f) => ({ ...f, content: tryGit(["show", `HEAD:${f.path}`], root) }));
 }
 
+/** Branch + uncommitted + untracked changes against a base ref (what "my change" is right now). */
+export function worktreeChanges(root: string, base: string): FileChange[] {
+  const mb = (tryGit(["merge-base", base, "HEAD"], root) ?? base).trim();
+  const diff = git(["diff", "--no-color", "--no-ext-diff", "-U0", "--diff-filter=ACMR", mb], root);
+  const fs = require("node:fs");
+  const changes = parseUnifiedDiff(diff);
+  const untracked = git(["ls-files", "--others", "--exclude-standard"], root).split("\n").filter(Boolean);
+  for (const p of untracked) {
+    try {
+      changes.push(fileAsChange(p, fs.readFileSync(`${root}/${p}`, "utf8")));
+    } catch {
+      /* unreadable */
+    }
+  }
+  return changes;
+}
+
+/** The base to compare with: the given ref, else origin/main, main or master. */
+export function defaultBase(root: string, given?: string): string {
+  if (given) return given;
+  for (const b of ["origin/main", "main", "master"]) if (tryGit(["rev-parse", "--verify", "--quiet", b], root)) return b;
+  return "HEAD";
+}
+
 /** Every tracked file as fully added (full branch analysis). */
 export function allTrackedFiles(root: string, filter = /\.(ts|tsx|js|jsx|mjs|cjs|json|ya?ml|py|go|java)$/): FileChange[] {
   return git(["ls-files"], root)

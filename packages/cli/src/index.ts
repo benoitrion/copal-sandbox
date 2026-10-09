@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
-import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef } from "./git";
+import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges } from "./git";
 
 const HELP = `copal — Copal pre-commit & policy CLI (sandbox)
 
@@ -16,6 +16,7 @@ Usage:
              Hints lead with a question; --show-me reveals fixes, --fix applies pattern fixes (both recorded)
   copal reflect "TASK" [--json] [--skip]                  Navigator: answer up to 3 questions before an AI builds TASK
   copal reflect "TASK" --answers FILE|- [--json]          Non-interactive: answers JSON → agent brief (IDE plugins)
+  copal scope-check [--base REF] [--json]                 Compare the change with .copal/brief.md; ask about anything beyond it (never blocks)
   copal event RULE_ID LEVEL ACTION [--source ide]         Record a hint-ladder step (0-4; shown|ask|explain|show_me|skipped|answered)
   copal hook install [--env ENV] | hook uninstall         Manage the git pre-commit hook
   copal hook install --claude                             Add the navigator to Claude Code (UserPromptSubmit hook)
@@ -238,6 +239,25 @@ function writeBriefFile(brief: AgentBrief, outOfScope?: string): string | undefi
   return path.relative(process.cwd(), file);
 }
 
+/** `copal scope-check`: what the change adds beyond the agreed brief, as questions. Always exits 0. */
+function scopeCheckCmd(flags: Flags): number {
+  const root = repoRoot(process.cwd());
+  const briefPath = path.join(root, ".copal", "brief.md");
+  if (!fs.existsSync(briefPath)) {
+    console.log(flags.json ? JSON.stringify({ brief: false, items: [] }) : dim('copal: no .copal/brief.md — run copal reflect "TASK" first.'));
+    return 0;
+  }
+  const base = defaultBase(root, typeof flags.base === "string" ? flags.base : undefined);
+  const items = scopeCheck(fs.readFileSync(briefPath, "utf8"), worktreeChanges(root, base));
+  if (flags.json) console.log(JSON.stringify({ brief: true, base, items }, null, 2));
+  else if (!items.length) console.log(green("✔ Everything in this change is covered by the brief."));
+  else {
+    console.log(bold(`Beyond the brief (vs ${base}):`));
+    for (const i of items) console.log(`${yellow("?")} ${i.question}${i.details.length ? dim(`\n    ${i.details.join(" · ")}`) : ""}`);
+  }
+  return 0;
+}
+
 /** Growth event with the repo's project and git author; best effort, never fails the caller. */
 async function recordEvent(e: Omit<CoachEvent, "project" | "developer" | "category"> & { category?: string }, cwd = process.cwd(), timeoutMs?: number): Promise<boolean> {
   let project: string | undefined;
@@ -381,6 +401,8 @@ async function main(): Promise<number> {
       return claudeHook();
     case "sync-context":
       return syncContext(flags);
+    case "scope-check":
+      return scopeCheckCmd(flags);
     case "event": {
       const [, ruleId, level, action] = cmd;
       if (!ruleId || !level || !action) return console.error("usage: copal event RULE_ID LEVEL ACTION"), 2;

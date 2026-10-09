@@ -1,4 +1,4 @@
-import { EXAMPLES_FIRST } from "./coach";
+import { EXAMPLES_FIRST, REPORT_RULE } from "./coach";
 /**
  * Request check: before an AI builds, does the request state a goal, a scope (what not to touch) and a definition of
  * done? Heuristic and cheap — it runs on every prompt. Silent on small, clear or bypassed requests.
@@ -49,7 +49,7 @@ export function requestCheckContext(prompt: string, brief?: string): string | nu
     `Question: ${QUESTIONS[gap]}`,
   ];
   if (next) lines.push("Offer these options:", `1. ${next}`, "2. Something else (they describe it)");
-  lines.push(`Then: ${EXAMPLES_FIRST}`);
+  lines.push(`Then: ${EXAMPLES_FIRST}`, REPORT_RULE);
   lines.push('If the developer says "just do it" or "skip", proceed without asking.');
   return lines.join("\n");
 }

@@ -13,3 +13,4 @@ export * from "./coach";
 export * from "./smells";
 export * from "./analytics";
 export * from "./request";
+export * from "./scope";
