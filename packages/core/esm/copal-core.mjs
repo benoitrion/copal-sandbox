@@ -1653,6 +1653,11 @@ function requestCheckContext(prompt, brief) {
   lines.push('If the developer says "just do it" or "skip", proceed without asking.');
   return lines.join("\n");
 }
+function requestCheckEvent(prompt) {
+  if (BYPASS.test(prompt)) return null;
+  const gap = requestGaps(prompt)[0];
+  return gap ? { ruleId: `request-${gap}`, category: "requests", levelReached: 1, action: "shown" } : null;
+}
 export {
   AGENT_CONTEXT_TARGETS,
   BUILTIN_PACKS,
@@ -1707,6 +1712,7 @@ export {
   referenceLink,
   reportToMarkdown,
   requestCheckContext,
+  requestCheckEvent,
   requestGaps,
   resolvePolicy,
   ruleHealth,

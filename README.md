@@ -189,6 +189,12 @@ not touch, then writes `.copal/brief.md`: task, scope in / out, 2–4 examples (
 `sync-context` block tell the AI: write the examples as failing tests, show them, wait for the developer's OK, then
 implement in small steps until they pass — nothing beyond the examples.
 
+## Hint data (growth)
+
+Every plugin records hint-ladder steps with `POST /v1/coach/events` (best effort, never blocks): VS Code directly,
+JetBrains through `copal event RULE LEVEL ACTION --category CAT`, the Claude Code hook as `request-<gap>` in category
+`requests`. Events carry the project and the git author; nothing is sent without a configured server.
+
 ## Brancher les plugins
 
 **MCP** — voir [`integrations/mcp/README.md`](integrations/mcp/README.md) (Claude Code, Cursor, VS Code/Copilot, Codex). `examples/billing-api/.mcp.json` est prêt à l'emploi.

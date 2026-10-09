@@ -72,4 +72,14 @@ class CopalModelsTest {
         val json = CopalJson.answersJson(AnswersInput(r.sessionId, r.questions, listOf(NavigatorAnswer("q1", "100 net gives 121")), skipped = false))
         assertTrue(json.contains("\"answers\":[{\"id\":\"q1\",\"text\":\"100 net gives 121\"}]"))
     }
+
+    @Test
+    fun `a hint is recorded as shown once per file, rule and line`() {
+        ShownHints.reset()
+        val f = Finding(ruleId = "no-float-money", category = "quality", line = 12)
+        assertTrue(ShownHints.firstTime("/repo/Invoice.kt", f))
+        assertEquals(false, ShownHints.firstTime("/repo/Invoice.kt", f))
+        assertTrue(ShownHints.firstTime("/repo/Invoice.kt", f.copy(line = 13)))
+        assertTrue(ShownHints.firstTime("/repo/Other.kt", f))
+    }
 }

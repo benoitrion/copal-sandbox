@@ -28,7 +28,9 @@ internal fun recordEvent(workDir: String?, f: Finding, level: Int, action: Strin
     if (CopalSettings.get().state.serverUrl.isBlank()) return
     ApplicationManager.getApplication().executeOnPooledThread {
         try {
-            CopalRunner.run(CopalRunner.command(workDir, "event", f.ruleId, level.toString(), action, "--source", "ide", "--json"), timeoutMs = 5_000)
+            val args = mutableListOf("event", f.ruleId, level.toString(), action, "--source", "ide", "--json")
+            f.category?.let { args += listOf("--category", it) }
+            CopalRunner.run(CopalRunner.command(workDir, *args.toTypedArray()), timeoutMs = 5_000)
         } catch (_: Exception) {
         }
     }

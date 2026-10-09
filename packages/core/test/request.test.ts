@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { requestCheckContext, requestGaps } from "../src";
+import { requestCheckContext, requestCheckEvent, requestGaps } from "../src";
 
 test("Add VAT to invoice totals → scope is the gap; one question about what not to touch", () => {
   const gaps = requestGaps("Add VAT to invoice totals.");
@@ -28,4 +28,11 @@ test("small requests and bypasses → no output", () => {
   assert.equal(requestCheckContext("rename foo to bar"), null);
   assert.equal(requestCheckContext("Add VAT to invoice totals, just do it"), null);
   assert.equal(requestCheckContext("Add VAT to invoice totals. skip"), null);
+});
+
+test("request check event: the asked gap is recorded as a 'requests' hint; nothing when silent", () => {
+  assert.deepEqual(requestCheckEvent("Add VAT to invoice totals."), { ruleId: "request-scope", category: "requests", levelReached: 1, action: "shown" });
+  assert.equal(requestCheckEvent("Continue the implementation.")?.ruleId, "request-goal");
+  assert.equal(requestCheckEvent("rename foo to bar"), null);
+  assert.equal(requestCheckEvent("Add VAT to invoice totals, just do it"), null);
 });

@@ -41,6 +41,12 @@ Acceptance examples (tests):
 Acceptance: brief file written with the three VAT examples from the white paper; instruction text contains the
 "wait for OK" and "nothing beyond the examples" rules.
 
+## Step 2b — Hint data from every plugin (added 2026-10-09)
+- JetBrains: record "shown" once per file/rule/line per IDE session and pass the rule's category with every event.
+- Claude Code hook: when the request check asks, record a `request-<gap>` event in category "requests".
+- `copal event` takes `--category`; all events carry the git author as developer.
+Acceptance: e2e — IDE events and the request-check event appear in `/v1/growth` for the developer.
+
 ## Step 3 — Assumption and beyond-scope report
 - Add to the `sync-context` block and the hook context: "End every task with two lists: *Assumptions I made that you
   didn't state* and *Things I added beyond the agreed examples*."

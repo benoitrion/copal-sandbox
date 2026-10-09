@@ -174,3 +174,12 @@ object CopalText {
         else -> 1
     }
 }
+
+/** Remembers which hints were already recorded as "shown" so re-annotating on every keystroke does not inflate growth. */
+object ShownHints {
+    private val seen = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun firstTime(path: String, f: Finding): Boolean = seen.add("$path|${f.ruleId}|${f.line}")
+
+    fun reset() = seen.clear()
+}

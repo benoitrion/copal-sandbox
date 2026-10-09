@@ -75,6 +75,14 @@ $GITAPP simulate --provider gitlab --dir . --base main --head HEAD --repo acme/b
 [ "$(state github 248)" = success ] && ok "GitHub #248 re-checked → success" || ko "github 248 should pass"
 [ "$(state gitlab 12)" = success ] && ok "GitLab !12 re-checked → success" || ko "gitlab 12 should pass"
 
+step "Hint data for the dashboard (JetBrains events, Claude Code request check)"
+$COPAL event no-float-money 1 shown --category quality --source ide --json >/dev/null
+$COPAL event no-float-money 1 answered --category quality --source ide --json >/dev/null
+echo '{"prompt":"Add VAT to invoice totals."}' | $COPAL claude-hook >/dev/null
+G=$(curl -s "$COPAL_SERVER/v1/growth?project=billing-api&developer=e2e" -H "x-api-key: $COPAL_API_KEY")
+echo "$G" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const g=JSON.parse(s);const c=g.categories.find(x=>x.category==='quality');process.exit(c&&c.answerRate===1?0:1)})" && ok "IDE events land in growth with their category and developer" || ko "quality events missing from growth: $G"
+echo "$G" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const g=JSON.parse(s);process.exit(g.categories.some(x=>x.category==='requests'&&x.recurrence['request-scope']===1)?0:1)})" && ok "Claude Code request check lands in growth as 'requests'" || ko "request check event missing: $G"
+
 step "Console evidence"
 curl -s "$COPAL_SERVER/v1/metrics" -H "x-api-key: $COPAL_API_KEY" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s);console.log('  analyses',m.analyses,'·',JSON.stringify(m.bySource),'· gates',JSON.stringify(m.gates));m.drift.slice(0,6).forEach(d=>console.log('   ',d.ruleId.padEnd(24),d.count,d.falsePositives?'('+d.falsePositives+' FP)':''))})"
 

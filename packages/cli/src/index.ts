@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef } from "./git";
 
@@ -238,6 +238,21 @@ function writeBriefFile(brief: AgentBrief, outOfScope?: string): string | undefi
   return path.relative(process.cwd(), file);
 }
 
+/** Growth event with the repo's project and git author; best effort, never fails the caller. */
+async function recordEvent(e: Omit<CoachEvent, "project" | "developer" | "category"> & { category?: string }, cwd = process.cwd(), timeoutMs?: number): Promise<boolean> {
+  let project: string | undefined;
+  let developer: string | undefined;
+  try {
+    developer = author(repoRoot(cwd));
+    project = loadRepoPolicy(cwd).project;
+  } catch {
+    /* outside a repo or no .copalrules */
+  }
+  const send = new CopalClient().coachEvents([{ project, developer, ...e } as CoachEvent]);
+  if (!timeoutMs) return send;
+  return Promise.race([send, new Promise<boolean>((r) => setTimeout(() => r(false), timeoutMs).unref())]);
+}
+
 /**
  * Claude Code UserPromptSubmit hook. Reads {"prompt": "..."} on stdin. For feature-sized prompts, adds context that
  * makes Claude act as navigator first: ask the developer Copal's questions, then build test-first in small steps.
@@ -255,6 +270,8 @@ async function claudeHook(): Promise<number> {
   const brief = fs.existsSync(briefPath) ? fs.readFileSync(briefPath, "utf8") : undefined;
   const context = requestCheckContext(prompt, brief);
   if (!context) return 0;
+  const ev = requestCheckEvent(prompt);
+  if (ev) await recordEvent({ ...ev, source: "agent" }, input.cwd ?? process.cwd(), 1500);
   console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } }));
   return 0;
 }
@@ -367,17 +384,13 @@ async function main(): Promise<number> {
     case "event": {
       const [, ruleId, level, action] = cmd;
       if (!ruleId || !level || !action) return console.error("usage: copal event RULE_ID LEVEL ACTION"), 2;
-      let project: string | undefined;
-      let developer: string | undefined;
-      try {
-        project = loadRepoPolicy(process.cwd()).project;
-        developer = author(repoRoot(process.cwd()));
-      } catch {
-        /* outside a repo */
-      }
-      const ok = await new CopalClient().coachEvents([
-        { project, developer, ruleId, levelReached: Math.max(0, Math.min(4, Number(level))) as CoachEvent["levelReached"], action: action as CoachEvent["action"], source: (flags.source as CoachEvent["source"]) ?? "ide" },
-      ]);
+      const ok = await recordEvent({
+        ruleId,
+        category: typeof flags.category === "string" ? flags.category : undefined,
+        levelReached: Math.max(0, Math.min(4, Number(level))) as CoachEvent["levelReached"],
+        action: action as CoachEvent["action"],
+        source: (flags.source as CoachEvent["source"]) ?? "ide",
+      });
       if (!flags.json) console.log(dim(ok ? "recorded" : "not recorded (no server)"));
       return 0;
     }

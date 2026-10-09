@@ -53,3 +53,10 @@ export function requestCheckContext(prompt: string, brief?: string): string | nu
   lines.push('If the developer says "just do it" or "skip", proceed without asking.');
   return lines.join("\n");
 }
+
+/** The hint event for the growth metric when the request check asks a question (null when it stays silent). */
+export function requestCheckEvent(prompt: string): { ruleId: string; category: "requests"; levelReached: 1; action: "shown" } | null {
+  if (BYPASS.test(prompt)) return null;
+  const gap = requestGaps(prompt)[0];
+  return gap ? { ruleId: `request-${gap}`, category: "requests", levelReached: 1, action: "shown" } : null;
+}

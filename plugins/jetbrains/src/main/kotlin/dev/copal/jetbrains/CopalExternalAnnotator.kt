@@ -76,6 +76,10 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
             } else if (f.suggestion != null) builder = builder.withFix(ApplySuggestionFix(f))
             if (CopalText.commentPrefix(file.name) != null) builder = builder.withFix(MarkFalsePositiveFix(f))
             builder.create()
+            // growth metric: a hint counts as "shown" once per file, rule and line per IDE session
+            if (f.coached && ShownHints.firstTime(file.virtualFile?.path ?: file.name, f)) {
+                recordEvent(file.virtualFile?.let { CopalRunner.findPolicyDir(it)?.path }, f, if (f.coach?.question != null) 1 else 0, "shown")
+            }
         }
     }
 
