@@ -40,3 +40,11 @@ test("non-commands and help", async () => {
   assert.equal(await runCommand(ctx("LGTM"), local), null);
   assert.match((await runCommand(ctx("/copal help"), local))!, /\/copal explain/);
 });
+
+test("/copal rule on Copal's own comment points to the existing rule; markdown is stripped from human comments", async () => {
+  const own = (await runCommand(ctx("/copal rule", { parent: { body: "**⛔ Copal (blocking)** · `ledger-rounding`\n\nInline rounding", byBot: true } }), local))!;
+  assert.match(own, /already exists/);
+  assert.doesNotMatch(own, /```yaml/);
+  const human = (await runCommand(ctx("/copal rule", { parent: { body: "**Please** don't use `Math.round` here — see [ADR-12](https://x/adr12).\n```suggestion\nfoo\n```", path: "src/a/b.ts" } }), local))!;
+  assert.match(human, /why: "Please don't use Math.round here — see ADR-12."/);
+});

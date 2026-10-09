@@ -12,7 +12,7 @@ export interface CommandContext {
   body: string;
   author?: string;
   /** Text and file of the comment this one replies to (review threads). */
-  parent?: { body: string; path?: string; url?: string };
+  parent?: { body: string; path?: string; url?: string; byBot?: boolean };
   path?: string;
   url?: string;
   project?: string;
@@ -72,7 +72,11 @@ export async function runCommand(ctx: CommandContext, client = new CopalClient()
   }
 
   // rule: from the inline text, or from the parent comment in a review thread
-  const source = arg || ctx.parent?.body?.trim();
+  if (!arg && ctx.parent && (ctx.parent.byBot || /^\*\*(⛔|💬|⚠️) Copal/.test(ctx.parent.body))) {
+    const id = /`([\w-]+)`/.exec(ctx.parent.body)?.[1];
+    return `That comment is Copal's own finding${id ? ` — the rule \`${id}\` already exists (\`/copal explain ${id}\`)` : ""}. Reply \`/copal rule\` to a reviewer's comment, or write \`/copal rule <what reviewers keep saying>\`.`;
+  }
+  const source = plainText(arg || ctx.parent?.body?.trim() || "");
   if (!source) return "Usage: `/copal rule <what reviewers keep saying>`, or reply `/copal rule` to a review comment.";
   const draft = draftRuleFromReview({ text: source, path: ctx.parent?.path ?? ctx.path, source: ctx.parent?.url ?? ctx.url, author: ctx.author });
   let recorded = "";
@@ -85,4 +89,18 @@ export async function runCommand(ctx: CommandContext, client = new CopalClient()
     }
   }
   return [`**Copal · rule draft** from ${ctx.parent ? "this review thread" : "your comment"}`, "", "```yaml", draft.yaml, "```", "", "Add it to `.copalrules`, then run `copal sync-context` so AI assistants receive it too." + recorded].join("\n");
+}
+
+/** Review comments are markdown: keep the words, drop markup, quotes and suggestion blocks. */
+export function plainText(md: string): string {
+  return md
+    .replace(/```suggestion[\s\S]*?```/g, " ")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/^>.*$/gm, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }

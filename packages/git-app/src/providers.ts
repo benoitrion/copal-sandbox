@@ -147,7 +147,7 @@ export class GitHubProvider implements GitProvider {
     }
   }
 
-  async reviewComment(id: number): Promise<{ body: string; path?: string; html_url?: string }> {
+  async reviewComment(id: number): Promise<{ body: string; path?: string; html_url?: string; user?: { login: string; type: string } }> {
     return (await (await http(this.api(`/pulls/comments/${id}`), { headers: await this.h() })).json()) as any;
   }
 
@@ -228,7 +228,7 @@ export class GitLabProvider implements GitProvider {
     }
   }
 
-  async discussionStart(discussionId: string): Promise<{ id: number; body: string; position?: { new_path?: string } }> {
+  async discussionStart(discussionId: string): Promise<{ id: number; body: string; position?: { new_path?: string }; author?: { bot?: boolean } }> {
     const d = (await (await http(this.api(`/merge_requests/${this.iid}/discussions/${discussionId}`), { headers: this.h() })).json()) as any;
     return d.notes[0];
   }
