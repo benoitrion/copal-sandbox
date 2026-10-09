@@ -82,4 +82,12 @@ class CopalModelsTest {
         assertTrue(ShownHints.firstTime("/repo/Invoice.kt", f.copy(line = 13)))
         assertTrue(ShownHints.firstTime("/repo/Other.kt", f))
     }
+
+    @Test
+    fun `heartbeats are throttled to one every two minutes`() {
+        Heartbeats.reset()
+        assertTrue(Heartbeats.due(1_000_000L))
+        assertEquals(false, Heartbeats.due(1_000_000L + 60_000L))
+        assertTrue(Heartbeats.due(1_000_000L + Heartbeats.INTERVAL_MS))
+    }
 }

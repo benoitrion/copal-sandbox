@@ -190,6 +190,40 @@ async function explain(ref: FindingRef) {
     const file = root ? path.join(root, c.reference) : undefined;
     if (file && fs.existsSync(file)) await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
   } else if (c.reference) output.appendLine(`Reference: ${c.reference}`);
+  if (c.kata) void offerKata(c.kata, f.ruleId, ref.uri);
+}
+
+type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; json(): Promise<any> }>;
+
+/** Record a finished kata (adds a kata URL to the team library when it is new). Best effort. */
+export async function kataDoneRequest(serverUrl: string, key: string | undefined, kataUrl: string, developer: string | undefined, ruleId: string | undefined, f: FetchLike = fetch as unknown as FetchLike): Promise<boolean> {
+  const base = serverUrl.replace(/\/$/, "");
+  const headers = { "content-type": "application/json", ...(key ? { "x-api-key": key } : {}) };
+  try {
+    const list = await (await f(`${base}/v1/katas`, { headers })).json();
+    let kata = (list?.katas ?? []).find((k: { id: string; url: string }) => k.url === kataUrl);
+    if (!kata) {
+      const title = decodeURIComponent(kataUrl.split("/").pop() ?? kataUrl).replace(/\.html?$/, "").replace(/[_-]+/g, " ");
+      kata = await (await f(`${base}/v1/katas`, { method: "POST", headers, body: JSON.stringify({ title, url: kataUrl, ruleId }) })).json();
+    }
+    if (!kata?.id) return false;
+    return (await f(`${base}/v1/katas/${kata.id}/complete`, { method: "POST", headers, body: JSON.stringify({ developer }) })).ok;
+  } catch {
+    return false;
+  }
+}
+
+/** After an explanation with a kata: open it, or mark it done (feeds the Katas page). */
+async function offerKata(kata: string, ruleId: string, uri: string) {
+  const pick = await vscode.window.showInformationMessage?.(`Practice for ${ruleId}: a short kata.`, "Open kata", "Mark kata done");
+  if (pick === "Open kata") await vscode.env?.openExternal?.(vscode.Uri.parse(kata));
+  if (pick === "Mark kata done") {
+    const { serverUrl } = cfg();
+    if (!serverUrl || !extCtx) return void vscode.window.showWarningMessage("Copal: set copal.serverUrl to record katas.");
+    const root = rootOf.get(uri);
+    const ok = await kataDoneRequest(serverUrl, await extCtx.secrets.get("copal.apiKey"), kata, root ? gitAuthor(root) : undefined, ruleId);
+    void vscode.window.showInformationMessage(ok ? "Copal: kata recorded. Nice work." : "Copal: could not record the kata (server unreachable).");
+  }
 }
 
 /** Level 4: apply the pattern correction if there is one, otherwise show the fix in words. Recorded. */

@@ -208,12 +208,20 @@ blocking, even when the rule is enforced), phrased as a question: "Was the test 
 Next time, which example could you write as a failing test first?" The rule's coaching (explanation, reference,
 kata) stays attached. Test and code in the same commit, or the test first, is clean.
 
-## Hint data (growth)
+## Dashboard data (what feeds each page)
 
-Every plugin records hint-ladder steps with `POST /v1/coach/events` (best effort, never blocks): VS Code directly,
-JetBrains through `copal event RULE LEVEL ACTION --category CAT`, the Claude Code hook as `request-<gap>` in category
-`requests`. Events carry the project and the git author; nothing is sent without a configured server.
+Everything is best effort (never blocks) and only sent when a Copal server is configured.
 
+| Page | Endpoint | Sent by |
+|---|---|---|
+| Growth, Katas suggestions | `POST /v1/coach/events` | VS Code, IntelliJ (`copal event … --category`), CLI checks, Claude Code request check (`request-<gap>`, category `requests`), PR bot (`source: pr`, PR author) |
+| Katas (done) | `POST /v1/katas`, `/v1/katas/:id/complete` | "Mark kata done" in VS Code and IntelliJ (Explain), `copal kata done URL\|ID` |
+| Rules health, Analytics › Review | `POST /v1/analyze`, false-positive events | CLI, pre-commit, PR bot, IDE "mark as false positive" |
+| Analytics › AI requests | `POST /v1/sessions` | Claude Code `SessionEnd` hook (tokens from the transcript; "with request check" when it asked or a brief exists), MCP `copal_record_session` |
+| Analytics › Adoption | `POST /v1/heartbeats` + the above | VS Code, IntelliJ (`copal heartbeat`, at most every 2 min) |
+
+Events carry the project and the git author (`user.name`). `copal hook install --claude` registers both
+`UserPromptSubmit` and `SessionEnd`.
 ## Brancher les plugins
 
 **MCP** — voir [`integrations/mcp/README.md`](integrations/mcp/README.md) (Claude Code, Cursor, VS Code/Copilot, Codex). `examples/billing-api/.mcp.json` est prêt à l'emploi.

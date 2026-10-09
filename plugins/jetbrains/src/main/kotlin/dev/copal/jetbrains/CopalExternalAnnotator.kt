@@ -57,6 +57,9 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
             CopalNotifier.warnOnce(file.project, "Copal: ${result.error}")
             return
         }
+        file.virtualFile?.let { vf ->
+            if (Heartbeats.due(System.currentTimeMillis())) runCli(CopalRunner.findPolicyDir(vf)?.path, "heartbeat", vf.name, "--editor", "jetbrains", "--json")
+        }
         val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return
         for (f in result.findings) {
             val range = rangeFor(document, f) ?: continue

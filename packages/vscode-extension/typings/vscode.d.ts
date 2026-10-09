@@ -12,6 +12,7 @@ declare module "vscode" {
     readonly scheme: string;
     readonly fsPath: string;
     toString(): string;
+    static parse(value: string): Uri;
   }
   export class Position {
     constructor(line: number, character: number);
@@ -160,6 +161,7 @@ declare module "vscode" {
   }
   export namespace env {
     const clipboard: { writeText(value: string): Thenable<void> };
+    function openExternal(target: Uri): Thenable<boolean>;
   }
   export namespace commands {
     function registerCommand(command: string, callback: (...args: any[]) => any): Disposable;

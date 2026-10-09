@@ -86,6 +86,18 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       }
     } else if (scope) await provider.comment(scope);
     await provider.setStatus(cs.headSha, result.blocking ? "failure" : "success", desc);
+    // Growth: the PR author saw these hints (best effort; same ladder level as the inline comment shows).
+    if (result.findings.length && typeof client.coachEvents === "function") {
+      let project: string | undefined;
+      try {
+        project = parsePolicy(cs.policyText).project;
+      } catch {
+        /* unparsable policy */
+      }
+      await client
+        .coachEvents(result.findings.map((f) => ({ project, developer: cs.author, ruleId: f.ruleId, category: f.category, levelReached: f.coach?.question ? 1 : 0, action: "shown" as const, source: "pr" as const })))
+        .catch(() => false);
+    }
     log(`${provider.label} → ${desc}`);
     return result;
   } catch (e) {

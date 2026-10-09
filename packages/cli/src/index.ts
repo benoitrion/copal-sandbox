@@ -17,6 +17,8 @@ Usage:
   copal reflect "TASK" [--json] [--skip]                  Navigator: answer up to 3 questions before an AI builds TASK
   copal reflect "TASK" --answers FILE|- [--json]          Non-interactive: answers JSON → agent brief (IDE plugins)
   copal scope-check [--base REF] [--json]                 Compare the change with .copal/brief.md; ask about anything beyond it (never blocks)
+  copal heartbeat FILE [--editor NAME]                    Record IDE activity (adoption)
+  copal kata done URL|ID [--rule RULE_ID]                 Record a finished kata (adds it to the library if new)
   copal event RULE_ID LEVEL ACTION [--source ide]         Record a hint-ladder step (0-4; shown|ask|explain|show_me|skipped|answered)
   copal hook install [--env ENV] | hook uninstall         Manage the git pre-commit hook
   copal hook install --claude                             Add the navigator to Claude Code (UserPromptSubmit hook)
@@ -249,6 +251,69 @@ function writeBriefFile(brief: AgentBrief, outOfScope?: string): string | undefi
   return path.relative(process.cwd(), file);
 }
 
+/** Record a finished kata for the current developer; a kata URL not yet in the team library is added first. */
+async function kataDone(ref: string, flags: Flags): Promise<number> {
+  const client = new CopalClient();
+  let developer: string | undefined;
+  try {
+    developer = author(repoRoot(process.cwd()));
+  } catch {
+    /* outside a repo */
+  }
+  try {
+    const list = await client.request<{ katas: { id: string; url: string }[] }>("GET", "/v1/katas");
+    let kata = list.katas.find((k) => k.id === ref || k.url === ref);
+    if (!kata && /^https?:\/\//.test(ref)) {
+      const title = decodeURIComponent(ref.split("/").pop() ?? ref).replace(/\.html?$/, "").replace(/[_-]+/g, " ");
+      kata = await client.request<{ id: string; url: string }>("POST", "/v1/katas", { title, url: ref, ruleId: typeof flags.rule === "string" ? flags.rule : undefined });
+    }
+    if (!kata) return console.error(`copal: unknown kata ${ref}`), 1;
+    await client.request("POST", `/v1/katas/${kata.id}/complete`, { developer });
+    if (!flags.json) console.log(green(`✔ kata done: ${kata.url}`));
+    return 0;
+  } catch (e) {
+    if (!flags.json) console.log(dim(`not recorded (${(e as Error).message})`));
+    return 0;
+  }
+}
+
+/** Claude Code SessionEnd: tokens from the transcript → one AI session for the usage page (best effort). */
+async function claudeSessionEnd(input: { transcript_path?: string; cwd?: string }): Promise<number> {
+  if (!input.transcript_path || !fs.existsSync(input.transcript_path)) return 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let model: string | undefined;
+  let requestCheck = false;
+  for (const line of fs.readFileSync(input.transcript_path, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    if (line.includes("Copal request check")) requestCheck = true;
+    try {
+      const m = JSON.parse(line)?.message;
+      if (m?.usage) {
+        inputTokens += (m.usage.input_tokens ?? 0) + (m.usage.cache_creation_input_tokens ?? 0);
+        outputTokens += m.usage.output_tokens ?? 0;
+        model ??= m.model;
+      }
+    } catch {
+      /* not JSON */
+    }
+  }
+  if (!inputTokens && !outputTokens) return 0;
+  const cwd = input.cwd ?? process.cwd();
+  let project: string | undefined;
+  try {
+    project = loadRepoPolicy(cwd).project;
+  } catch {
+    /* no .copalrules */
+  }
+  const navigatorUsed = requestCheck || fs.existsSync(path.join(cwd, ".copal", "brief.md"));
+  const send = new CopalClient()
+    .recordSession({ agent: "claude-code", project, inputTokens, outputTokens, tokens: inputTokens + outputTokens, model, navigatorUsed })
+    .catch(() => undefined);
+  await Promise.race([send, new Promise((r) => setTimeout(r, 2000).unref())]);
+  return 0;
+}
+
 /** `copal scope-check`: what the change adds beyond the agreed brief, as questions. Always exits 0. */
 function scopeCheckCmd(flags: Flags): number {
   const root = repoRoot(process.cwd());
@@ -288,12 +353,13 @@ async function recordEvent(e: Omit<CoachEvent, "project" | "developer" | "catego
  * makes Claude act as navigator first: ask the developer Copal's questions, then build test-first in small steps.
  */
 async function claudeHook(): Promise<number> {
-  let input: { prompt?: string; cwd?: string } = {};
+  let input: { prompt?: string; cwd?: string; hook_event_name?: string; transcript_path?: string } = {};
   try {
     input = JSON.parse(fs.readFileSync(0, "utf8") || "{}");
   } catch {
     return 0;
   }
+  if (input.hook_event_name === "SessionEnd") return claudeSessionEnd(input);
   const prompt = input.prompt ?? "";
   if (/^\s*\//.test(prompt)) return 0; // slash commands
   const briefPath = path.join(input.cwd ?? process.cwd(), ".copal", "brief.md");
@@ -353,8 +419,10 @@ function installClaudeHook(): number {
   }
   const command = "npx --no-install copal claude-hook 2>/dev/null || copal claude-hook";
   settings.hooks ??= {};
-  const list = (settings.hooks.UserPromptSubmit ??= []);
-  if (!list.some((e) => e.hooks?.some((h) => h.command.includes("copal claude-hook")))) list.push({ hooks: [{ type: "command", command }] });
+  for (const event of ["UserPromptSubmit", "SessionEnd"]) {
+    const list = (settings.hooks[event] ??= []);
+    if (!list.some((e) => e.hooks?.some((h) => h.command.includes("copal claude-hook")))) list.push({ hooks: [{ type: "command", command }] });
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
   console.log(green(`✔ Claude Code navigator hook added to ${path.relative(process.cwd(), file) || file}`) + dim(" (feature-sized prompts get Copal's questions first)"));
@@ -411,6 +479,17 @@ async function main(): Promise<number> {
       return claudeHook();
     case "sync-context":
       return syncContext(flags);
+    case "heartbeat": {
+      if (!cmd[1]) return console.error("usage: copal heartbeat FILE [--editor NAME]"), 2;
+      const ok = await new CopalClient()
+        .heartbeats([{ file: cmd[1], ts: Date.now(), editor: typeof flags.editor === "string" ? flags.editor : "ide" }])
+        .then(() => true, () => false);
+      if (!flags.json) console.log(dim(ok ? "recorded" : "not recorded (no server)"));
+      return 0;
+    }
+    case "kata":
+      if (cmd[1] !== "done" || !cmd[2]) return console.error("usage: copal kata done URL|ID [--rule RULE_ID]"), 2;
+      return kataDone(cmd[2], flags);
     case "scope-check":
       return scopeCheckCmd(flags);
     case "event": {

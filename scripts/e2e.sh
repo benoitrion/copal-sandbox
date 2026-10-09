@@ -116,6 +116,24 @@ G=$(curl -s "$COPAL_SERVER/v1/growth?project=billing-api&developer=e2e" -H "x-ap
 echo "$G" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const g=JSON.parse(s);const c=g.categories.find(x=>x.category==='quality');process.exit(c&&c.answerRate===1?0:1)})" && ok "IDE events land in growth with their category and developer" || ko "quality events missing from growth: $G"
 echo "$G" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const g=JSON.parse(s);process.exit(g.categories.some(x=>x.category==='requests'&&x.recurrence['request-scope']===1)?0:1)})" && ok "Claude Code request check lands in growth as 'requests'" || ko "request check event missing: $G"
 
+step "Every dashboard page has real data from the plugins"
+TR="$WORK/transcript.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"Add VAT"}}' \
+  '{"type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":1200,"output_tokens":300}}}' \
+  '{"type":"attachment","content":"Copal request check: before doing anything"}' \
+  '{"type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":800,"output_tokens":200}}}' > "$TR"
+echo "{\"hook_event_name\":\"SessionEnd\",\"transcript_path\":\"$TR\",\"cwd\":\"$PWD\"}" | $COPAL claude-hook >/dev/null
+$COPAL heartbeat src/invoice/total.ts --editor jetbrains >/dev/null
+$COPAL kata done https://sammancoaching.org/kata_descriptions/string_calculator.html --rule invoice-contract-test >/dev/null
+api() { curl -s "$COPAL_SERVER$1" -H "x-api-key: $COPAL_API_KEY"; }
+has() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=JSON.parse(s);process.exit(($1)?0:1)})"; }
+api "/v1/usage?project=billing-api" | has "x.sessions>0 && x.withNavigator.sessions>0" && ok "AI usage: Claude Code session with tokens, counted 'with request check'" || ko "usage missing: $(api /v1/usage?project=billing-api)"
+api "/v1/reach?project=billing-api" | has "x.ide.heartbeats>0 && x.agents['claude-code']" && ok "Adoption: IDE heartbeats and Claude Code seen" || ko "reach missing: $(api /v1/reach?project=billing-api)"
+api "/v1/katas?project=billing-api" | has "x.katas.some(k=>k.completions.length>0)" && ok "Katas: completion recorded from the CLI/IDE" || ko "kata completion missing"
+api "/v1/growth?project=billing-api&developer=e2e" | has "x.events>0 && x.categories.length>1" && ok "Growth: personal hint history across categories" || ko "growth empty"
+api "/v1/rules/health?project=billing-api" | has "Array.isArray(x.rules)?x.rules.length>0:Object.keys(x).length>0" && ok "Rules: health computed" || ko "rule health empty"
+api "/v1/metrics?project=billing-api" | has "x.analyses>0" && ok "Analytics: reviews recorded" || ko "metrics empty"
+
 step "Console evidence"
 curl -s "$COPAL_SERVER/v1/metrics" -H "x-api-key: $COPAL_API_KEY" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s);console.log('  analyses',m.analyses,'·',JSON.stringify(m.bySource),'· gates',JSON.stringify(m.gates));m.drift.slice(0,6).forEach(d=>console.log('   ',d.ruleId.padEnd(24),d.count,d.falsePositives?'('+d.falsePositives+' FP)':''))})"
 

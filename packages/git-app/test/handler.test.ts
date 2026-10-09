@@ -79,3 +79,23 @@ test("PR check adds a tests-first audit question when code was committed before 
   assert.match(late.findings[0].message, /written after the code\?/);
   assert.equal(late.status, "success", "audit only");
 });
+
+test("PR findings count as 'shown' hints for the PR author (growth), best effort", async () => {
+  const { runCheck } = require("../src/handler");
+  const sent: { developer?: string; source: string; action: string; ruleId: string; project?: string }[] = [];
+  const provider = {
+    name: "github",
+    label: "acme/billing-api#11",
+    load: async () => ({ files: [], headSha: "abc", title: "x", author: "ana", policyText: "version: 4\nproject: billing-api\nrules: []\n", ref: "acme/billing-api#11" }),
+    setStatus: async () => undefined,
+    postReview: async () => undefined,
+    comment: async () => undefined,
+  };
+  const finding = { ruleId: "ledger-rounding", category: "architecture", file: "a.ts", line: 1, blocking: false, coach: { question: "Who owns rounding?" } };
+  const client = {
+    analyze: async () => ({ findings: [finding], blocking: false, summary: { total: 1, blocking: 0, audit: 1, byCategory: {} }, environment: "ci", mode: "local" }),
+    coachEvents: async (e: typeof sent) => (sent.push(...e), true),
+  };
+  await runCheck(provider, client);
+  assert.deepEqual(sent.map((e) => [e.developer, e.source, e.action, e.ruleId, e.project]), [["ana", "pr", "shown", "ledger-rounding", "billing-api"]]);
+});

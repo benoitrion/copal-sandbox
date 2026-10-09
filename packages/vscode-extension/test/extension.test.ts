@@ -192,3 +192,20 @@ test("growth events name the developer from git config user.name (cached per fol
   assert.equal(ext.gitAuthor(dir), "ana", "cached");
   assert.equal(ext.gitAuthor(path.join(dir, "missing")), undefined);
 });
+
+test("Mark kata done: finds the kata by URL (or adds it), then records the completion for the developer", async () => {
+  const ext = require("../src/extension");
+  const calls: { method: string; url: string; body?: any }[] = [];
+  const fake = async (url: string, init: any = {}) => {
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    calls.push({ method: init.method ?? "GET", url, body });
+    if (url.endsWith("/v1/katas") && !init.method) return { ok: true, json: async () => ({ katas: [] }) };
+    if (url.endsWith("/v1/katas")) return { ok: true, json: async () => ({ id: "k_1", url: body.url }) };
+    return { ok: true, json: async () => ({}) };
+  };
+  const ok = await ext.kataDoneRequest("http://s", "key", "https://sammancoaching.org/kata_descriptions/string_calculator.html", "ana", "invoice-contract-test", fake);
+  assert.equal(ok, true);
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url.replace("http://s", "")}`), ["GET /v1/katas", "POST /v1/katas", "POST /v1/katas/k_1/complete"]);
+  assert.equal(calls[1].body.ruleId, "invoice-contract-test");
+  assert.equal(calls[2].body.developer, "ana");
+});

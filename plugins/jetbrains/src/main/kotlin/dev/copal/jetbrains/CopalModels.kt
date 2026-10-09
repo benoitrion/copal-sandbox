@@ -183,3 +183,21 @@ object ShownHints {
 
     fun reset() = seen.clear()
 }
+
+/** At most one IDE heartbeat every two minutes (the adoption metric only needs "is the plugin in use"). */
+object Heartbeats {
+    const val INTERVAL_MS = 120_000L
+    @Volatile private var last = 0L
+
+    @Synchronized
+    fun due(now: Long): Boolean {
+        if (now - last < INTERVAL_MS) return false
+        last = now
+        return true
+    }
+
+    @Synchronized
+    fun reset() {
+        last = 0L
+    }
+}

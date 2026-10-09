@@ -36,6 +36,17 @@ internal fun recordEvent(workDir: String?, f: Finding, level: Int, action: Strin
     }
 }
 
+/** Fire-and-forget CLI call for dashboard data (kata done, heartbeat); never blocks the editor. */
+internal fun runCli(workDir: String?, vararg args: String) {
+    if (CopalSettings.get().state.serverUrl.isBlank()) return
+    ApplicationManager.getApplication().executeOnPooledThread {
+        try {
+            CopalRunner.run(CopalRunner.command(workDir, *args), timeoutMs = 10_000)
+        } catch (_: Exception) {
+        }
+    }
+}
+
 private fun workDirOf(file: PsiFile?): String? = file?.virtualFile?.let { CopalRunner.findPolicyDir(it)?.path }
 
 /** Level 1 — "Ask me": the rule's question in a dialog; the developer thinks aloud, then can climb the ladder. */
@@ -73,9 +84,13 @@ class ExplainFix(private val finding: Finding) : IntentionAction, PriorityAction
         val ref = finding.coach?.reference
         val buttons = mutableListOf("Close")
         if (ref != null) buttons.add(0, "Open reference")
-        if (finding.coach?.kata != null) buttons.add(0, "Open kata")
+        if (finding.coach?.kata != null) {
+            buttons.add(0, "Mark kata done")
+            buttons.add(0, "Open kata")
+        }
         when (buttons.getOrNull(Messages.showDialog(project, CopalText.explainText(finding), "Copal · Explain ${finding.ruleId}", buttons.toTypedArray(), buttons.size - 1, null))) {
             "Open kata" -> BrowserUtil.browse(finding.coach!!.kata!!)
+            "Mark kata done" -> runCli(workDir, "kata", "done", finding.coach!!.kata!!, "--rule", finding.ruleId, "--json")
             "Open reference" -> {
                 if (ref!!.startsWith("http")) BrowserUtil.browse(ref)
                 else workDir?.let { LocalFileSystem.getInstance().findFileByIoFile(File(it, ref)) }?.let { OpenFileDescriptor(project, it).navigate(true) }
