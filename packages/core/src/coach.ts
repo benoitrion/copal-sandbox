@@ -204,13 +204,16 @@ export interface AgentBrief {
   firstTest?: string;
   location?: string;
   edgeCases: string[];
+  /** 2–4 agreed examples (input → expected): the first answer plus the edge cases. They become the failing tests. */
+  examples: string[];
+  scope: { in?: string; out?: string };
   rules: { id: string; what: string }[];
   /** Instructions handed to the agent. */
   instructions: string[];
 }
 
 /** Turn the developer's answers into the brief the agent works from (test first, small steps). */
-export function buildBrief(policy: Policy | undefined, task: string, questions: NavigatorQuestion[], answers: NavigatorAnswer[], skipped = false): AgentBrief {
+export function buildBrief(policy: Policy | undefined, task: string, questions: NavigatorQuestion[], answers: NavigatorAnswer[], skipped = false, opts: { outOfScope?: string } = {}): AgentBrief {
   const byKind = (k: NavigatorQuestionKind) => {
     const q = questions.find((x) => x.kind === k);
     const a = q && answers.find((x) => x.id === q.id)?.text?.trim();
@@ -223,10 +226,16 @@ export function buildBrief(policy: Policy | undefined, task: string, questions: 
     firstTest: byKind("first-example"),
     location: byKind("placement"),
     edgeCases: risk ? risk.split(/\s*(?:;|\n|,\s*(?=and\b)|\band\b)\s*/i).map((s) => s.trim()).filter(Boolean) : [],
+    examples: [],
+    scope: {},
     rules: (policy?.rules ?? []).filter((r) => r.mode !== "off").slice(0, 12).map((r) => ({ id: r.id, what: ruleSummary(r) })),
     instructions: [],
   };
+  brief.examples = [brief.firstTest, ...brief.edgeCases].filter((x): x is string => !!x).slice(0, 4);
+  if (brief.location) brief.scope.in = brief.location;
+  if (opts.outOfScope?.trim()) brief.scope.out = opts.outOfScope.trim();
   brief.instructions = [
+    ...(brief.examples.length ? [EXAMPLES_FIRST] : []),
     brief.firstTest ? `Start with one failing test for: ${brief.firstTest}. Make it pass with the simplest code, then refactor.` : "Start with one failing test for the simplest case, make it pass, then refactor.",
     brief.location ? `Put the logic where the developer said: ${brief.location}.` : "Ask the developer where the logic belongs before creating new modules.",
     ...brief.edgeCases.map((e) => `Add a test for: ${e}.`),
@@ -236,12 +245,29 @@ export function buildBrief(policy: Policy | undefined, task: string, questions: 
   return brief;
 }
 
+/** The examples-first rule, shared by the brief, the Claude Code hook and the sync-context block. */
+export const EXAMPLES_FIRST =
+  "Write the agreed examples as failing tests first, show them, and wait for the developer's OK before implementing. Then implement in small steps until they pass — nothing beyond the examples.";
+
+/** The brief as `.copal/brief.md` — read by any AI assistant, the hook (`Next:`) and the IDE task panel. */
+export function briefToMarkdown(b: AgentBrief): string {
+  const out = [`# Task: ${b.task}`, ""];
+  out.push(`Scope in: ${b.scope.in ?? "(not stated — ask)"}`, `Scope out: ${b.scope.out ?? "(not stated — ask)"}`, "", "## Examples");
+  out.push(...(b.examples.length ? b.examples.map((e) => `- [ ] ${e}`) : ["- (none agreed yet — ask for the first example)"]));
+  out.push("", "Done when: every example above passes as a test, existing tests stay green, nothing beyond the examples.");
+  if (b.examples.length) out.push(`Next: make "${b.examples[0]}" pass`);
+  out.push("", "## How to work", ...b.instructions.map((i) => `- ${i}`));
+  if (b.rules.length) out.push("", "## Team rules", ...b.rules.map((r) => `- ${r.id}: ${r.what}`));
+  return out.join("\n") + "\n";
+}
+
 /** Brief rendered as text for an agent's context. */
 export function briefToText(b: AgentBrief): string {
   const out = [`Copal navigator brief — ${b.skipped ? "developer skipped the questions" : "agreed with the developer"}`, `Task: ${b.task}`];
   if (b.firstTest) out.push(`First failing test: ${b.firstTest}`);
   if (b.location) out.push(`Location: ${b.location}`);
   if (b.edgeCases.length) out.push(`Edge cases: ${b.edgeCases.join("; ")}`);
+  if (b.scope.out) out.push(`Do not touch: ${b.scope.out}`);
   out.push("", "How to work:", ...b.instructions.map((i) => `- ${i}`));
   if (b.rules.length) out.push("", "Team rules:", ...b.rules.map((r) => `- ${r.id}: ${r.what}`));
   return out.join("\n");
@@ -341,7 +367,9 @@ export function agentContextBlock(policy: Policy, project?: string): string {
   lines.push(
     "",
     "### How to work",
-    "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong. Then work test-first in small steps.",
+    "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong.",
+    `- ${EXAMPLES_FIRST}`,
+    "- If `.copal/brief.md` exists, it holds the agreed task, scope and examples.",
     "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
     CONTEXT_END,
   );

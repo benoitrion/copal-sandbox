@@ -181,6 +181,14 @@ request states a **goal**, a **scope** (what not to touch) and a **definition of
 - "Continue"-style requests: if `.copal/brief.md` has a `Next:` line, it is offered as option 1.
 - "just do it" / "skip" bypasses the check. Works without `.copalrules`.
 
+## Examples first + brief file
+
+`copal reflect "<task>"` asks for the first example, where the code belongs, what could go wrong and what the change must
+not touch, then writes `.copal/brief.md`: task, scope in / out, 2–4 examples (`input → expected`), done-when and a
+`Next:` line. IDE plugins pass `outOfScope` in the `--answers` JSON. The brief, the Claude Code hook and the
+`sync-context` block tell the AI: write the examples as failing tests, show them, wait for the developer's OK, then
+implement in small steps until they pass — nothing beyond the examples.
+
 ## Brancher les plugins
 
 **MCP** — voir [`integrations/mcp/README.md`](integrations/mcp/README.md) (Claude Code, Cursor, VS Code/Copilot, Codex). `examples/billing-api/.mcp.json` est prêt à l'emploi.

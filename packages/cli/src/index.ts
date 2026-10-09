@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef } from "./git";
 
@@ -191,9 +191,10 @@ async function reflect(task: string, flags: Flags): Promise<number> {
   if (flags.answers) {
     // Non-interactive second step (IDE plugins): JSON {sessionId, questions, answers, skipped} on stdin or in a file.
     const raw = flags.answers === "-" || flags.answers === true ? fs.readFileSync(0, "utf8") : fs.readFileSync(String(flags.answers), "utf8");
-    const inp = JSON.parse(raw) as { sessionId?: string; questions?: { id: string; kind: "first-example" | "placement" | "risk"; text: string }[]; answers?: { id: string; text: string }[]; skipped?: boolean };
+    const inp = JSON.parse(raw) as { outOfScope?: string; sessionId?: string; questions?: { id: string; kind: "first-example" | "placement" | "risk"; text: string }[]; answers?: { id: string; text: string }[]; skipped?: boolean };
     const answers = (inp.answers ?? []).filter((a) => a.text?.trim());
     const brief = await client.answer(inp.sessionId ?? "local_cli", answers, !!inp.skipped || answers.length === 0, policy, { task, questions: inp.questions ?? [] });
+    writeBriefFile(brief, inp.outOfScope);
     console.log(flags.json ? JSON.stringify({ brief, text: briefToText(brief) }) : briefToText(brief));
     return 0;
   }
@@ -208,6 +209,7 @@ async function reflect(task: string, flags: Flags): Promise<number> {
   }
   const answers: { id: string; text: string }[] = [];
   let skipped = !!flags.skip;
+  let outOfScope = "";
   if (!skipped) {
     const rl = (await import("node:readline/promises")).createInterface({ input: process.stdin, output: process.stdout });
     console.log(cyan(bold("Copal navigator")) + dim(" — explain it before the AI types it. Empty answer = skip."));
@@ -215,12 +217,25 @@ async function reflect(task: string, flags: Flags): Promise<number> {
       const a = (await rl.question(`\n${cyan("?")} ${q.text}\n> `)).trim();
       if (a) answers.push({ id: q.id, text: a });
     }
+    outOfScope = (await rl.question(`\n${cyan("?")} What should this change not touch?\n> `)).trim();
     rl.close();
     skipped = answers.length === 0;
   }
   const brief = await client.answer(s.sessionId, answers, skipped, policy, { task, questions: s.questions });
-  console.log("\n" + briefToText(brief));
+  const file = writeBriefFile(brief, outOfScope);
+  console.log("\n" + briefToText(brief) + (file ? dim(`\n\nSaved to ${file}`) : ""));
   return 0;
+}
+
+/** Save the agreed brief as .copal/brief.md (examples, scope, done-when) so any AI assistant and the IDE can read it. */
+function writeBriefFile(brief: AgentBrief, outOfScope?: string): string | undefined {
+  if (brief.skipped) return undefined;
+  if (outOfScope?.trim()) brief.scope = { ...(brief.scope ?? {}), out: outOfScope.trim() };
+  const dir = path.join(process.cwd(), ".copal");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "brief.md");
+  fs.writeFileSync(file, briefToMarkdown({ ...brief, examples: brief.examples ?? [], scope: brief.scope ?? {} }));
+  return path.relative(process.cwd(), file);
 }
 
 /**
