@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, navigatorQuestions, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef } from "./git";
 
@@ -236,21 +236,10 @@ async function claudeHook(): Promise<number> {
   }
   const prompt = input.prompt ?? "";
   if (/^\s*\//.test(prompt)) return 0; // slash commands
-  let policy;
-  try {
-    policy = loadRepoPolicy(input.cwd ?? process.cwd()).policy;
-  } catch {
-    return 0; // no .copalrules — stay silent
-  }
-  const s = navigatorQuestions(policy, prompt);
-  if (!s.engage) return 0;
-  const context = [
-    "Copal navigator (strong-style pairing): this is a feature-sized task. Before writing any code, ask the developer these questions, one message, numbered, and wait for their answers. Do not answer them yourself and do not include code in the questions.",
-    ...s.questions.map((q, i) => `${i + 1}. ${q.text}`),
-    "",
-    "Then: write the first failing test from their first answer, make it pass with the simplest code, refactor, and continue in small steps. Put the code where they said. Respect the repository's .copalrules (call the copal_get_rules MCP tool if available).",
-    'If the developer says "just do it" or "skip", proceed without the questions.',
-  ].join("\n");
+  const briefPath = path.join(input.cwd ?? process.cwd(), ".copal", "brief.md");
+  const brief = fs.existsSync(briefPath) ? fs.readFileSync(briefPath, "utf8") : undefined;
+  const context = requestCheckContext(prompt, brief);
+  if (!context) return 0;
   console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } }));
   return 0;
 }

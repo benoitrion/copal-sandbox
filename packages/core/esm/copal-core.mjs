@@ -1593,6 +1593,45 @@ function reach(input) {
     navigator: { sessions: nav.length, answered: nav.filter((n) => n.answeredAt && !n.skipped).length, skipped: nav.filter((n) => n.skipped).length }
   };
 }
+
+// src/request.ts
+var SMALL = /^\s*(fix (a |the )?typo|rename|format|reformat|bump|lint|sort imports|remove unused|add (a )?comment)\b/i;
+var QUESTION = /^\s*(what|why|how|where|when|which|who|is|are|can|could|does|do|explain|show me|tell me)\b|\?\s*$/i;
+var BYPASS = /\b(just do it|no questions)\b|(^|[\s.,;:!])skip\s*[.!]?\s*$/i;
+var CONTINUE = /^\s*(please\s+)?(continue|go on|keep going|proceed|carry on|next|do it|go ahead|finish( it)?)\b[\w\s.,!]*$/i;
+var SCOPE = /\b(only|don'?t (touch|change|modify)|do not (touch|change|modify)|without (changing|touching)|leave .* (untouched|as is)|scope|limited to|nothing else|just (the|this))\b/i;
+var DONE = /\b(should|must|expect(ed)?|returns?|so that|done when|until|passes?|pass)\b|→|->|=>/i;
+function requestGaps(prompt) {
+  const p = prompt.trim();
+  if (!p || SMALL.test(p) || QUESTION.test(p)) return [];
+  if (CONTINUE.test(p)) return ["goal"];
+  const gaps = [];
+  if (!SCOPE.test(p)) gaps.push("scope");
+  if (!DONE.test(p)) gaps.push("done");
+  return gaps;
+}
+function briefNextStep(brief) {
+  return brief?.match(/^\s*Next:\s*(.+?)\s*$/im)?.[1];
+}
+var QUESTIONS = {
+  goal: "What exactly should happen next?",
+  scope: "What should this change not touch?",
+  done: "How will we know it's done \u2014 which example or test should pass?"
+};
+function requestCheckContext(prompt, brief) {
+  if (BYPASS.test(prompt)) return null;
+  const gaps = requestGaps(prompt);
+  if (!gaps.length) return null;
+  const gap = gaps[0];
+  const next = gap === "goal" ? briefNextStep(brief) : void 0;
+  const lines = [
+    "Copal request check: before doing anything, ask the developer exactly one short question and wait for the answer. Do not assume the answer and do not start coding.",
+    `Question: ${QUESTIONS[gap]}`
+  ];
+  if (next) lines.push("Offer these options:", `1. ${next}`, "2. Something else (they describe it)");
+  lines.push('If the developer says "just do it" or "skip", proceed without asking.');
+  return lines.join("\n");
+}
 export {
   AGENT_CONTEXT_TARGETS,
   BUILTIN_PACKS,
@@ -1609,6 +1648,7 @@ export {
   applicableRules,
   blankCode,
   bold,
+  briefNextStep,
   briefToText,
   buildBrief,
   containsCode,
@@ -1643,6 +1683,8 @@ export {
   redact,
   referenceLink,
   reportToMarkdown,
+  requestCheckContext,
+  requestGaps,
   resolvePolicy,
   ruleHealth,
   ruleSummary,
