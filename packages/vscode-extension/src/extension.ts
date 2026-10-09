@@ -99,6 +99,21 @@ function findingFor(ref: FindingRef): Finding | undefined {
   return findingsByUri.get(ref.uri)?.find((f) => f.ruleId === ref.ruleId && f.line === ref.line);
 }
 
+const authors = new Map<string, string | undefined>();
+/** The developer behind growth events: `git config user.name` of the repo, like the CLI. Cached per folder. */
+export function gitAuthor(dir: string): string | undefined {
+  if (!authors.has(dir)) {
+    let name: string | undefined;
+    try {
+      name = require("node:child_process").execFileSync("git", ["config", "user.name"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+    } catch {
+      /* not a repo or git missing */
+    }
+    authors.set(dir, name);
+  }
+  return authors.get(dir);
+}
+
 /** Growth metric: the ladder level a finding reached (best effort, never blocks the developer). */
 async function coachEvent(f: Finding, levelReached: HintLevel, action: string, uri?: string) {
   const { serverUrl } = cfg();
@@ -108,7 +123,7 @@ async function coachEvent(f: Finding, levelReached: HintLevel, action: string, u
     await fetch(serverUrl.replace(/\/$/, "") + "/v1/coach/events", {
       method: "POST",
       headers: { "content-type": "application/json", ...(key ? { "x-api-key": key } : {}) },
-      body: JSON.stringify({ project: uri ? projectOf.get(uri) : undefined, ruleId: f.ruleId, category: f.category, levelReached, action, source: "ide", at: new Date().toISOString() }),
+      body: JSON.stringify({ project: uri ? projectOf.get(uri) : undefined, developer: uri && rootOf.get(uri) ? gitAuthor(rootOf.get(uri)!) : undefined, ruleId: f.ruleId, category: f.category, levelReached, action, source: "ide", at: new Date().toISOString() }),
     });
   } catch {
     /* offline */

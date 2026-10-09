@@ -180,3 +180,15 @@ test("coached findings lead with the question; the fix is behind Show me", async
   assert.ok(commands["copal.pair"], "navigator command registered");
   ctx.subscriptions.forEach((s) => s.dispose());
 });
+
+test("growth events name the developer from git config user.name (cached per folder)", () => {
+  const { execFileSync } = require("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "copal-author-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "ana"], { cwd: dir });
+  const ext = require("../src/extension");
+  assert.equal(ext.gitAuthor(dir), "ana");
+  execFileSync("git", ["config", "user.name", "bob"], { cwd: dir });
+  assert.equal(ext.gitAuthor(dir), "ana", "cached");
+  assert.equal(ext.gitAuthor(path.join(dir, "missing")), undefined);
+});
