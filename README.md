@@ -8,7 +8,7 @@ Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout e
 > Product reference: white paper *Copal — The AI Technical Mentor in Your IDE*. Current work: [`docs/plugin-alignment-prompt.md`](docs/plugin-alignment-prompt.md);
 > website: [`docs/lovable-mentor-landing-prompt.md`](docs/lovable-mentor-landing-prompt.md).
 >
-> **Frozen** (not part of the current product; kept for the API contract): the reference server's `/v1/growth`, `/v1/usage`,
+> **Unfrozen for the app dashboard** (see `docs/lovable-dashboard-prompt.md`): `/v1/growth`, `/v1/usage`, `/v1/katas*`, `/v1/reach`, `/v1/rules/health` feed the Growth, Katas, Rules and Analytics pages — personal data for developers, team trends without names for leads.
 > `/v1/katas*`, `/v1/reach`, `/v1/rules/health` endpoints and the console's Growth, Katas & learning hours and AI usage tabs.
 
 ```
