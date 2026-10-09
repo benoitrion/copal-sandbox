@@ -4,11 +4,12 @@
 
 Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout en bout, **sans aucune dépendance npm à l'exécution** (seul TypeScript sert au build).
 
-> **Copal = coach technique dans le workflow IA.** Chaque finding est une *hint card* qui commence par une question
-> (échelle : signal → question → référence → exemple → correctif sur demande « Show me »). Avant qu'un agent IA
-> construise une fonctionnalité, le **navigator** pose ≤ 3 questions (premier exemple → test qui échoue, emplacement,
-> risques) et en fait le brief : test d'abord, petits pas. Les erreurs récurrentes renvoient à un **kata**.
-> Stratégie complète : livre blanc *Copal — Coaching AI-Assisted Development* ; prompt Lovable : [`docs/lovable-pivot-prompt.md`](docs/lovable-pivot-prompt.md).
+> **Copal is a technical mentor inside the IDE — it reviews code while you write it, with or without AI, and helps you ask AI for the right thing.**
+> Product reference: white paper *Copal — The AI Technical Mentor in Your IDE*. Current work: [`docs/plugin-alignment-prompt.md`](docs/plugin-alignment-prompt.md);
+> website: [`docs/lovable-mentor-landing-prompt.md`](docs/lovable-mentor-landing-prompt.md).
+>
+> **Frozen** (not part of the current product; kept for the API contract): the reference server's `/v1/growth`, `/v1/usage`,
+> `/v1/katas*`, `/v1/reach`, `/v1/rules/health` endpoints and the console's Growth, Katas & learning hours and AI usage tabs.
 
 ```
                      ┌──────────── .copalrules (versionné dans le repo) ────────────┐
@@ -169,6 +170,16 @@ environments:                       # surcharges par environnement (--env ci)
 ```
 
 Faux positif : `// copal-ignore <rule-id>` sur la ligne ou celle du dessus (proposé en quick fix dans VS Code).
+
+## Request check (Claude Code)
+
+`copal hook install --claude` registers `copal claude-hook` on UserPromptSubmit. Before the AI builds, it checks whether the
+request states a **goal**, a **scope** (what not to touch) and a **definition of done** (`requestGaps` in `@copal/core`).
+
+- Small or clear requests (typo, rename, question, request with scope and done): silent.
+- Otherwise Claude is asked to put **one** question to the developer about the most important gap first.
+- "Continue"-style requests: if `.copal/brief.md` has a `Next:` line, it is offered as option 1.
+- "just do it" / "skip" bypasses the check. Works without `.copalrules`.
 
 ## Brancher les plugins
 
