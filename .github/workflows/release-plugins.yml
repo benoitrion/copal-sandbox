@@ -1,0 +1,109 @@
+name: release-plugins
+# Publishes the IDE plugins and the CLI when a GitHub release tagged `plugins-vX.Y.Z` is published
+# (Releases → Draft a new release → tag plugins-vX.Y.Z on main). Always attaches the installable files to the release;
+# publishes to a store only when its token is set in Settings → Secrets and variables → Actions:
+#   VSCE_PAT                      VS Code Marketplace (publisher in packages/vscode-extension/package.json)
+#   OVSX_PAT                      Open VSX (Cursor, Windsurf, VSCodium)
+#   JETBRAINS_MARKETPLACE_TOKEN   JetBrains Marketplace (first upload of a new plugin must be done by hand on the site)
+#   NPM_TOKEN                     npm: @copal/core, @copal/client, @copal/cli, @copal/mcp-server (needs the npm org "copal")
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+      go: ${{ steps.t.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          V=$(node -p "require('./packages/vscode-extension/package.json').version")
+          if [ -z "$TAG" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; echo "tag=" >> "$GITHUB_OUTPUT"; exit 0; fi
+          case "$TAG" in plugins-v*) ;; *) echo "not a plugins release ($TAG)"; echo "go=0" >> "$GITHUB_OUTPUT"; exit 0;; esac
+          J=$(grep '^pluginVersion' plugins/jetbrains/gradle.properties | cut -d= -f2 | tr -d ' ')
+          C=$(node -p "require('./packages/cli/package.json').version")
+          for x in "$V" "$J" "$C"; do test "$TAG" = "plugins-v$x" || { echo "tag $TAG != versions vscode $V / jetbrains $J / cli $C"; exit 1; }; done
+          echo "go=1" >> "$GITHUB_OUTPUT"; echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  vscode:
+    needs: check
+    if: needs.check.outputs.go == '1'
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund && npm test
+      - run: bash packages/vscode-extension/scripts-package.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: copal-vscode, path: packages/vscode-extension/*.vsix }
+      - name: Attach to release
+        if: needs.check.outputs.tag != ''
+        run: gh release upload "${{ needs.check.outputs.tag }}" packages/vscode-extension/*.vsix --clobber
+      - name: VS Code Marketplace
+        if: env.VSCE_PAT != '' && needs.check.outputs.tag != ''
+        run: cd packages/vscode-extension && npx --yes @vscode/vsce publish --packagePath *.vsix --pat "$VSCE_PAT"
+      - name: Open VSX
+        if: env.OVSX_PAT != '' && needs.check.outputs.tag != ''
+        run: cd packages/vscode-extension && npx --yes ovsx publish *.vsix --pat "$OVSX_PAT"
+
+  jetbrains:
+    needs: check
+    if: needs.check.outputs.go == '1'
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: plugins/jetbrains }
+    env:
+      PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test buildPlugin --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: { name: copal-jetbrains, path: plugins/jetbrains/build/distributions/*.zip }
+      - name: Attach to release
+        if: needs.check.outputs.tag != ''
+        run: gh release upload "${{ needs.check.outputs.tag }}" build/distributions/*.zip --clobber
+      - name: JetBrains Marketplace
+        if: env.PUBLISH_TOKEN != '' && needs.check.outputs.tag != ''
+        run: ./gradlew publishPlugin --no-daemon
+
+  npm:
+    needs: check
+    if: needs.check.outputs.go == '1'
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: "https://registry.npmjs.org" }
+      - run: npm install --no-audit --no-fund && npm test
+      - run: npm pack -w packages/client -w packages/cli -w packages/mcp-server
+      - name: Attach to release
+        if: needs.check.outputs.tag != ''
+        run: gh release upload "${{ needs.check.outputs.tag }}" copal-*.tgz --clobber
+      - name: Publish (dependency order; already-published versions are skipped)
+        if: env.NODE_AUTH_TOKEN != '' && needs.check.outputs.tag != ''
+        run: |
+          for p in core client cli mcp-server; do
+            N=$(node -p "require('./packages/$p/package.json').name"); V=$(node -p "require('./packages/$p/package.json').version")
+            if npm view "$N@$V" version >/dev/null 2>&1; then echo "$N@$V already published"; continue; fi
+            npm publish -w "packages/$p" --access public
+          done

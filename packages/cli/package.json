@@ -1,6 +1,6 @@
 {
   "name": "@copal/cli",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "bin": {
@@ -8,6 +8,16 @@
   },
   "dependencies": {
     "@copal/core": "0.3.0",
-    "@copal/client": "0.1.0"
-  }
+    "@copal/client": "0.2.0"
+  },
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benoitrion/copal-sandbox"
+  },
+  "homepage": "https://copal.lovable.app",
+  "files": [
+    "dist/src",
+    "README.md"
+  ]
 }

@@ -2,7 +2,7 @@
   "name": "copal-vscode",
   "displayName": "Copal.dev",
   "description": "Copal technical coach in the editor: hint cards (question, explain, show me), navigator before AI builds, katas.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "copal",
   "license": "UNLICENSED",
   "engines": {
@@ -85,5 +85,10 @@
   },
   "dependencies": {
     "@copal/core": "0.3.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benoitrion/copal-sandbox"
+  },
+  "homepage": "https://copal.lovable.app"
 }

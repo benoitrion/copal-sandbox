@@ -18,7 +18,7 @@
     <p>Requires Node.js 20+ and the <code>copal</code> CLI.</p>
     ]]></description>
 
-    <change-notes><![CDATA[<p>0.2.0 — coaching: hint ladder (Ask me · Explain · Show me), Copal Pair navigator tool window, kata links.</p>
+    <change-notes><![CDATA[<p>0.3.0 — Review My Change (hint cards before a pull request), Copal Task window (brief, examples, scope check), Mark kata done, growth data with categories.</p><p>0.2.0 — coaching: hint ladder (Ask me · Explain · Show me), Copal Pair navigator tool window, kata links.</p>
     <p>0.1.0 — first sandbox release.</p>]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
