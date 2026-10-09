@@ -5,6 +5,6 @@
   "dependencies": {
     "@copal/core": "0.3.0",
     "@copal/git-app": "0.1.0",
-    "@copal/client": "0.1.0"
+    "@copal/client": "0.2.0"
   }
 }
