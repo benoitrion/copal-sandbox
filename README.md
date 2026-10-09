@@ -208,6 +208,14 @@ blocking, even when the rule is enforced), phrased as a question: "Was the test 
 Next time, which example could you write as a failing test first?" The rule's coaching (explanation, reference,
 kata) stays attached. Test and code in the same commit, or the test first, is clean.
 
+## Review my change
+
+Before you open a pull request: **VS Code** "Copal: Review my change" and **IntelliJ** Tools › Copal.dev › Review My
+Change (or the *Copal Review* tool window) run the engine and the scope check on your change — branch commits,
+uncommitted edits and new files against `origin/main` / `main` / `master` — and show the result as hint cards (same
+content as the PR comments) with **Ask me · Explain · Show me**, plus "Beyond the brief" when `.copal/brief.md` exists.
+Local only, no server call. Terminal: `copal review [--base REF] [--json]`.
+
 ## Dashboard data (what feeds each page)
 
 Everything is best effort (never blocks) and only sent when a Copal server is configured.

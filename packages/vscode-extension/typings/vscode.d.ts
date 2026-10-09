@@ -13,6 +13,7 @@ declare module "vscode" {
     readonly fsPath: string;
     toString(): string;
     static parse(value: string): Uri;
+    static file(path: string): Uri;
   }
   export class Position {
     constructor(line: number, character: number);
@@ -139,7 +140,23 @@ declare module "vscode" {
     function registerHoverProvider(selector: { scheme?: string; language?: string }, provider: HoverProvider): Disposable;
     function registerCodeActionsProvider(selector: { scheme?: string; language?: string }, provider: CodeActionProvider, metadata?: { providedCodeActionKinds?: readonly CodeActionKind[] }): Disposable;
   }
+  export enum ViewColumn {
+    Beside = -2,
+  }
+  export interface Webview {
+    html: string;
+    options: { enableScripts?: boolean };
+    onDidReceiveMessage(listener: (message: any) => void): Disposable;
+  }
+  export interface WebviewPanel {
+    readonly webview: Webview;
+    title: string;
+    reveal(column?: ViewColumn): void;
+    onDidDispose(listener: () => void): Disposable;
+    dispose(): void;
+  }
   export namespace workspace {
+    const workspaceFolders: readonly { uri: Uri }[] | undefined;
     const textDocuments: readonly TextDocument[];
     function getConfiguration(section?: string): WorkspaceConfiguration;
     function findFiles(include: string, exclude?: string, maxResults?: number): Thenable<Uri[]>;
@@ -152,6 +169,7 @@ declare module "vscode" {
   }
   export namespace window {
     const activeTextEditor: TextEditor | undefined;
+    function createWebviewPanel(viewType: string, title: string, column: ViewColumn, options?: { enableScripts?: boolean }): WebviewPanel;
     function createOutputChannel(name: string): OutputChannel;
     function createStatusBarItem(alignment?: StatusBarAlignment, priority?: number): StatusBarItem;
     function showInformationMessage(message: string, ...items: string[]): Thenable<string | undefined>;
@@ -165,5 +183,6 @@ declare module "vscode" {
   }
   export namespace commands {
     function registerCommand(command: string, callback: (...args: any[]) => any): Disposable;
+    function executeCommand<T = unknown>(command: string, ...rest: any[]): Thenable<T>;
   }
 }

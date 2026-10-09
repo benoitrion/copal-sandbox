@@ -21,19 +21,19 @@
     "commands": [
       {
         "command": "copal.checkFile",
-        "title": "Copal: Vérifier le fichier courant"
+        "title": "Copal: V\u00e9rifier le fichier courant"
       },
       {
         "command": "copal.checkWorkspace",
-        "title": "Copal: Vérifier le workspace"
+        "title": "Copal: V\u00e9rifier le workspace"
       },
       {
         "command": "copal.setApiKey",
-        "title": "Copal: Définir la clé API"
+        "title": "Copal: D\u00e9finir la cl\u00e9 API"
       },
       {
         "command": "copal.showRules",
-        "title": "Copal: Afficher les règles applicables"
+        "title": "Copal: Afficher les r\u00e8gles applicables"
       },
       {
         "command": "copal.pair",
@@ -54,6 +54,10 @@
       {
         "command": "copal.syncAgentFiles",
         "title": "Copal: Sync agent instruction files (CLAUDE.md, AGENTS.md, Cursor, Copilot)"
+      },
+      {
+        "command": "copal.reviewChange",
+        "title": "Copal: Review my change"
       }
     ],
     "configuration": {
@@ -62,7 +66,7 @@
         "copal.serverUrl": {
           "type": "string",
           "default": "http://localhost:4010",
-          "description": "URL du backend Copal (mock local par défaut). Vide = moteur local uniquement."
+          "description": "URL du backend Copal (mock local par d\u00e9faut). Vide = moteur local uniquement."
         },
         "copal.environment": {
           "type": "string",

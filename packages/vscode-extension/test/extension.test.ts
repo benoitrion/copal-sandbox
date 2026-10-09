@@ -59,6 +59,8 @@ const listeners: Record<string, ((x: any) => void)[]> = {};
 const ev = (name: string) => (fn: (x: any) => void) => ((listeners[name] ??= []).push(fn), { dispose() {} });
 const diags = new Map<string, Diagnostic[]>();
 let provider: any;
+const executed: { name: string; args: unknown[] }[] = [];
+const panels: any[] = [];
 const statusBar = { text: "", tooltip: "", command: "", show() {}, hide() {}, dispose() {} };
 
 const fakeVscode = {
@@ -95,9 +97,27 @@ const fakeVscode = {
     showInformationMessage: async () => undefined,
     showWarningMessage: async () => undefined,
     showInputBox: async () => undefined,
+    showTextDocument: async () => undefined,
+    createWebviewPanel: (_id: string, title: string) => {
+      const panel = {
+        title,
+        webview: { html: "", options: {}, onDidReceiveMessage: (fn: (m: any) => void) => ((panel.onMessage = fn), { dispose() {} }) },
+        onMessage: undefined as undefined | ((m: any) => void),
+        reveal() {},
+        onDidDispose: () => ({ dispose() {} }),
+        dispose() {},
+      };
+      panels.push(panel);
+      return panel;
+    },
   },
   env: { clipboard: { writeText: async () => undefined } },
-  commands: { registerCommand: (name: string, fn: (...a: any[]) => any) => ((commands[name] = fn), { dispose() {} }) },
+  Uri: { file: (p: string) => ({ scheme: "file", fsPath: p, toString: () => "file://" + p }), parse: (v: string) => ({ toString: () => v }) },
+  ViewColumn: { Beside: -2 },
+  commands: {
+    registerCommand: (name: string, fn: (...a: any[]) => any) => ((commands[name] = fn), { dispose() {} }),
+    executeCommand: async (name: string, ...args: unknown[]) => (executed.push({ name, args }), commands[name]?.(...args)),
+  },
 };
 
 const origLoad = Module._load;
@@ -208,4 +228,33 @@ test("Mark kata done: finds the kata by URL (or adds it), then records the compl
   assert.deepEqual(calls.map((c) => `${c.method} ${c.url.replace("http://s", "")}`), ["GET /v1/katas", "POST /v1/katas", "POST /v1/katas/k_1/complete"]);
   assert.equal(calls[1].body.ruleId, "invoice-contract-test");
   assert.equal(calls[2].body.developer, "ana");
+});
+
+test("Review my change: scenario 01 in a git repo → panel with three hint cards and Ask me / Explain / Show me", async (t) => {
+  const { execFileSync } = require("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "copal-review-"));
+  fs.cpSync(APP, repo, { recursive: true, filter: (s) => !s.includes(`${path.sep}scenarios`) });
+  const g = (...a: string[]) => execFileSync("git", a, { cwd: repo, stdio: "ignore" });
+  g("init", "-q", "-b", "main");
+  g("config", "user.name", "ana");
+  g("config", "user.email", "ana@example.com");
+  g("add", "-A");
+  g("commit", "-qm", "base");
+  fs.cpSync(path.join(APP, "scenarios/01-invoice-rounding/src"), path.join(repo, "src"), { recursive: true });
+
+  const ext = require("../src/extension");
+  const ctx = { subscriptions: [] as { dispose(): void }[], secrets: { get: async () => undefined, store: async () => undefined } };
+  ext.activate(ctx);
+  t.after(() => ctx.subscriptions.forEach((s) => s.dispose()));
+  await commands["copal.reviewChange"](repo);
+  const panel = panels.at(-1);
+  assert.ok(panel, "a panel opens");
+  const html: string = panel.webview.html;
+  for (const id of ["ledger-rounding", "invoice-contract-test", "hardcoded-credentials"]) assert.ok(html.includes(id), id);
+  for (const label of ["Ask me", "Explain", "Show me"]) assert.equal(html.split(`>${label}</button>`).length - 1, 3, label);
+
+  panel.onMessage({ command: "copal.explain", ruleId: "ledger-rounding", file: "src/invoice/total.ts", line: 8 });
+  const call = executed.find((e) => e.name === "copal.explain")!;
+  assert.ok(call, "buttons run the existing ladder commands");
+  assert.match((call.args[0] as { uri: string }).uri, /src\/invoice\/total\.ts$/);
 });

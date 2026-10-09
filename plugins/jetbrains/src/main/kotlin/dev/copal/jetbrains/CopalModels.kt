@@ -92,6 +92,17 @@ object CopalJson {
 
     fun answersJson(input: AnswersInput): String = gson.toJson(input)
 
+    /** `copal review --json` (pretty-printed; warnings may precede it). */
+    fun parseReview(stdout: String): ReviewOutput? {
+        val start = stdout.indexOf("\n{").let { if (it >= 0) it + 1 else if (stdout.trimStart().startsWith("{")) stdout.indexOf('{') else -1 }
+        if (start < 0) return null
+        return try {
+            gson.fromJson(stdout.substring(start), ReviewOutput::class.java)?.let { it.copy(findings = it.findings ?: emptyList(), scope = it.scope ?: emptyList()) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Parses the last JSON object line printed by the CLI (warnings may precede it). */
     fun parseReport(stdout: String): Report? {
         val json = stdout.lineSequence().map { it.trim() }.lastOrNull { it.startsWith("{") } ?: return null
@@ -199,5 +210,24 @@ object Heartbeats {
     @Synchronized
     fun reset() {
         last = 0L
+    }
+}
+
+data class ScopeItem(val file: String = "", val question: String = "", val details: List<String>? = null)
+
+/** `copal review --json`: findings (same shape as a check report) and what goes beyond the brief. */
+data class ReviewOutput(
+    val base: String? = null,
+    val blocking: Boolean = false,
+    val findings: List<Finding>? = emptyList(),
+    val scope: List<ScopeItem>? = emptyList(),
+)
+
+object ReviewText {
+    /** The ladder steps a hint card offers — same rule as the PR comment and VS Code. */
+    fun actions(f: Finding): List<String> = buildList {
+        if (f.coach?.question != null) add("Ask me")
+        if (f.why != null || f.coach?.reference != null || f.coach?.example != null) add("Explain")
+        if (f.fix != null) add("Show me")
     }
 }

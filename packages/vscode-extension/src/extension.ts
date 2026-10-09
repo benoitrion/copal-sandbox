@@ -17,6 +17,10 @@ import {
   navigatorQuestions,
   Policy,
   rulesToGuidance,
+  parseUnifiedDiff,
+  reviewChange,
+  ReviewCard,
+  ScopeItem,
 } from "@copal/core";
 
 /**
@@ -226,6 +230,103 @@ async function offerKata(kata: string, ruleId: string, uri: string) {
   }
 }
 
+// ---------------------------------------------------------------- review my change
+function gitOut(args: string[], cwd: string): string | undefined {
+  try {
+    return require("node:child_process").execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return undefined;
+  }
+}
+
+/** The developer's change right now: branch + uncommitted + new files, against origin/main, main or master. */
+function workingTreeChanges(root: string, base?: string) {
+  const ref = base ?? ["origin/main", "main", "master"].find((b) => gitOut(["rev-parse", "--verify", "--quiet", b], root)) ?? "HEAD";
+  const mb = (gitOut(["merge-base", ref, "HEAD"], root) ?? ref).trim();
+  const changes = parseUnifiedDiff(gitOut(["diff", "--no-color", "--no-ext-diff", "-U0", "--diff-filter=ACMR", mb], root) ?? "");
+  for (const p of (gitOut(["ls-files", "--others", "--exclude-standard"], root) ?? "").split("\n").filter(Boolean)) {
+    try {
+      changes.push(fileAsChange(p, fs.readFileSync(path.join(root, p), "utf8")));
+    } catch {
+      /* unreadable */
+    }
+  }
+  // full contents help the engine (imports, smells)
+  return {
+    base: ref,
+    changes: changes.map((c) => {
+      try {
+        return { ...c, content: c.content ?? fs.readFileSync(path.join(root, c.path), "utf8") };
+      } catch {
+        return c;
+      }
+    }),
+  };
+}
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+const ACTION_COMMAND: Record<string, string> = { "Ask me": "copal.ask", Explain: "copal.explain", "Show me": "copal.showMe" };
+
+/** Hint cards as HTML — the same content and order as the PR comment: signal, question, then the ladder. */
+export function reviewHtml(cards: ReviewCard[], scope: ScopeItem[], base: string): string {
+  const card = (c: ReviewCard) =>
+    `<section class="card ${c.blocking ? "blocking" : ""}"><h3>${esc(c.title)}</h3><div class="loc">${esc(c.location)}</div><p>${esc(c.signal)}</p>${
+      c.question ? `<p class="q">${esc(c.question)}</p>` : ""
+    }<div class="actions">${c.actions
+      .map((a) => `<button data-command="${ACTION_COMMAND[a]}" data-rule="${esc(c.ruleId)}" data-file="${esc(c.file)}" data-line="${c.line}">${a}</button>`)
+      .join("")}</div></section>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);padding:8px 16px}
+.card{border:1px solid var(--vscode-panel-border);border-radius:6px;padding:10px 14px;margin:10px 0}
+.card.blocking{border-left:3px solid var(--vscode-errorForeground)}
+h3{margin:0;font-size:13px}.loc{opacity:.7;font-size:12px}.q{font-weight:600}
+button{margin-right:6px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border:0;padding:4px 10px;border-radius:3px;cursor:pointer}
+</style></head><body>
+<h2>Review my change <small>vs ${esc(base)}</small></h2>
+${cards.length ? cards.map(card).join("\n") : "<p>Nothing to discuss in this change.</p>"}
+${scope.length ? `<h2>Beyond the brief</h2><ul>${scope.map((i) => `<li>${esc(i.question)}</li>`).join("")}</ul>` : ""}
+<script>const vscode=acquireVsCodeApi();document.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>vscode.postMessage({command:b.dataset.command,ruleId:b.dataset.rule,file:b.dataset.file,line:Number(b.dataset.line)})));</script>
+</body></html>`;
+}
+
+let reviewPanel: vscode.WebviewPanel | undefined;
+
+/** "Copal: Review my change" — engine + scope check on the working tree, shown as hint cards. No server call. */
+async function reviewMyChange(rootArg?: string) {
+  const start = rootArg ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!start) return void vscode.window.showWarningMessage("Copal: open a folder to review your change.");
+  let loaded;
+  try {
+    loaded = loadPolicy(start);
+  } catch {
+    return void vscode.window.showWarningMessage("Copal: no .copalrules found in this workspace.");
+  }
+  const root = (gitOut(["rev-parse", "--show-toplevel"], loaded.root) ?? loaded.root).trim();
+  const { base, changes } = workingTreeChanges(root);
+  const briefFile = path.join(root, ".copal", "brief.md");
+  const brief = fs.existsSync(briefFile) ? fs.readFileSync(briefFile, "utf8") : undefined;
+  const r = reviewChange(changes, loaded.policy, { brief, environment: cfg().environment });
+  // make the ladder commands work on files that are not open
+  const byUri = new Map<string, Finding[]>();
+  for (const c of r.cards) {
+    const uri = vscode.Uri.file(path.join(root, c.file)).toString();
+    byUri.set(uri, [...(byUri.get(uri) ?? []), c.finding]);
+    rootOf.set(uri, root);
+    projectOf.set(uri, loaded.policy.project);
+  }
+  byUri.forEach((list, uri) => findingsByUri.set(uri, list));
+  if (!reviewPanel) {
+    reviewPanel = vscode.window.createWebviewPanel("copalReview", "Copal · Review my change", vscode.ViewColumn.Beside, { enableScripts: true });
+    reviewPanel.onDidDispose(() => (reviewPanel = undefined));
+    reviewPanel.webview.onDidReceiveMessage((m: { command: string; ruleId: string; file: string; line: number }) => {
+      if (!Object.values(ACTION_COMMAND).includes(m.command)) return;
+      void vscode.commands.executeCommand(m.command, { uri: vscode.Uri.file(path.join(root, m.file)).toString(), ruleId: m.ruleId, line: m.line });
+    });
+  } else reviewPanel.reveal(vscode.ViewColumn.Beside);
+  reviewPanel.webview.html = reviewHtml(r.cards, r.scope, base);
+  for (const c of r.cards) void coachEvent(c.finding, c.question ? 1 : 0, "shown", vscode.Uri.file(path.join(root, c.file)).toString());
+}
+
 /** Level 4: apply the pattern correction if there is one, otherwise show the fix in words. Recorded. */
 async function showMe(ref: FindingRef) {
   const f = findingFor(ref);
@@ -375,6 +476,7 @@ export function activate(ctx: vscode.ExtensionContext) {
       if (f) void coachEvent(f, 4, "show_me", ref.uri);
     }),
     vscode.commands.registerCommand("copal.pair", pair),
+    vscode.commands.registerCommand("copal.reviewChange", reviewMyChange),
     vscode.commands.registerCommand("copal.syncAgentFiles", syncAgentFiles),
     vscode.commands.registerCommand("copal.recordFalsePositive", (ref: FindingRef) => {
       const f = findingFor(ref);

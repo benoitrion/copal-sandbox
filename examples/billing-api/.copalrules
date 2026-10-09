@@ -75,6 +75,7 @@ rules:
     requireTest:
       test: "src/invoice/{name}.test.ts"
     why: "Invoice maths is contract-tested against the ledger fixtures."
+    fix: "Add src/invoice/<name>.test.ts with one example from the ledger fixtures (input → expected total) and run it before changing the code."
     coach:
       question: "Which example would prove this invoice change is right — and is it written down as a test yet?"
       reference: docs/rules/invoice-contract-test.md

@@ -90,4 +90,21 @@ class CopalModelsTest {
         assertEquals(false, Heartbeats.due(1_000_000L + 60_000L))
         assertTrue(Heartbeats.due(1_000_000L + Heartbeats.INTERVAL_MS))
     }
+
+    // Output of: copal review --json on billing-api scenario 01 (fields trimmed), plus one scope item.
+    private val reviewJson = """
+        copal: a warning first
+        {"base":"main","blocking":true,"findings":[{"ruleId":"ledger-rounding","category":"architecture","blocking":true,"file":"src/invoice/total.ts","line":8,"message":"Inline rounding bypasses LedgerPort","why":"Rounding in one place keeps invoices and the ledger reconciled.","suggestion":{"original":"  const total = Math.round(sum * 100) / 100;","replacement":"  const total = LedgerPort.round(sum, Currency.EUR);"},"coach":{"question":"Who owns rounding in this codebase?","reference":"docs/rules/ledger-rounding.md","kata":"https://sammancoaching.org/kata_descriptions/supermarket_receipt.html"}},{"ruleId":"hardcoded-credentials","category":"security","blocking":true,"file":"src/invoice/total.ts","line":12,"message":"Hard-coded credential detected (aws-access-key: AKIA…7Z2M)","why":"Credentials in source end up in git history, prompts and logs. Load them from the secret manager.","fixText":"Remove the literal, read it from configuration (e.g. config.require('PAYMENTS_KEY') backed by the secret manager), and rotate the exposed credential.","coach":{"question":"Where should this value live so it never reaches git, a prompt or a log?"}},{"ruleId":"invoice-contract-test","category":"testing","blocking":false,"file":"src/invoice/total.ts","line":6,"message":"Change has no accompanying test (expected src/invoice/total.test.ts)","why":"Invoice maths is contract-tested against the ledger fixtures.","fixText":"Add src/invoice/<name>.test.ts with one example from the ledger fixtures (input → expected total) and run it before changing the code.","coach":{"question":"Which example would prove this invoice change is right — and is it written down as a test yet?","reference":"docs/rules/invoice-contract-test.md","kata":"https://sammancoaching.org/kata_descriptions/string_calculator.html"}}],"scope":[{"file":"src/web/settings-page.ts","question":"Not in the brief: src/web/settings-page.ts — keep it?","details":["new export renderSettingsPage"]}]}
+    """.trimIndent()
+
+    @Test
+    fun `review output parses into three hint cards with the full ladder and the scope list`() {
+        val r = CopalJson.parseReview(reviewJson)
+        assertNotNull(r)
+        assertEquals(listOf("hardcoded-credentials", "invoice-contract-test", "ledger-rounding"), r!!.findings.map { it.ruleId }.sorted())
+        r.findings.forEach { assertEquals(it.ruleId, listOf("Ask me", "Explain", "Show me"), ReviewText.actions(it)) }
+        assertEquals("main", r.base)
+        assertEquals("src/web/settings-page.ts", r.scope.single().file)
+        assertNull(CopalJson.parseReview("not json"))
+    }
 }

@@ -19,6 +19,7 @@ export const BUILTIN_PACKS: Record<string, Policy> = {
         severity: "error",
         secrets: true,
         why: "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+        fix: "Remove the literal, read it from configuration (e.g. config.require('PAYMENTS_KEY') backed by the secret manager), and rotate the exposed credential.",
         coach: {
           question: "Where should this value live so it never reaches git, a prompt or a log?",
           example: { bad: 'const key = "AKIA…"', good: "const key = config.require('PAYMENTS_KEY')" },

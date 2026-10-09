@@ -39,6 +39,8 @@
         <notificationGroup id="Copal.dev" displayType="BALLOON"/>
         <toolWindow id="Copal Pair" anchor="right" factoryClass="dev.copal.jetbrains.CopalPairToolWindowFactory"
                     icon="AllIcons.Toolwindows.ToolWindowMessages" canCloseContents="false"/>
+        <toolWindow id="Copal Review" anchor="right" factoryClass="dev.copal.jetbrains.CopalReviewToolWindowFactory"
+                    icon="AllIcons.Actions.Preview" canCloseContents="false"/>
     </extensions>
 
     <actions>
@@ -46,6 +48,8 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="Copal.PairOnTask" class="dev.copal.jetbrains.PairOnTaskAction"
                     text="Pair on a Task…" description="Navigator: answer up to 3 questions before an AI assistant builds a feature"/>
+            <action id="Copal.ReviewMyChange" class="dev.copal.jetbrains.ReviewMyChangeAction"
+                    text="Review My Change" description="Hint cards for your change vs the base branch, before you open a pull request (local, no server)"/>
             <action id="Copal.SyncAgentFiles" class="dev.copal.jetbrains.SyncAgentFilesAction"
                     text="Sync Agent Instruction Files" description="Write the team's rules into CLAUDE.md, AGENTS.md, Cursor and Copilot instruction files"/>
             <separator/>

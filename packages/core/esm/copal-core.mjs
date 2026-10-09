@@ -599,6 +599,7 @@ var BUILTIN_PACKS = {
         severity: "error",
         secrets: true,
         why: "Credentials in source end up in git history, prompts and logs. Load them from the secret manager.",
+        fix: "Remove the literal, read it from configuration (e.g. config.require('PAYMENTS_KEY') backed by the secret manager), and rotate the exposed credential.",
         coach: {
           question: "Where should this value live so it never reaches git, a prompt or a log?",
           example: { bad: 'const key = "AKIA\u2026"', good: "const key = config.require('PAYMENTS_KEY')" }
@@ -1744,6 +1745,23 @@ function scopeCheck(briefMd, changes) {
   }
   return items;
 }
+
+// src/review.ts
+function reviewActions(c2) {
+  const out = [];
+  if (c2.question) out.push("Ask me");
+  if (c2.why || c2.reference || c2.example) out.push("Explain");
+  if (c2.fix) out.push("Show me");
+  return out;
+}
+function reviewChange(changes, policy, opts = {}) {
+  const report = evaluate(changes, policy, { environment: opts.environment ?? "local" });
+  const cards = report.findings.map((f) => {
+    const card = hintCard(f);
+    return { ...card, file: f.file, line: f.line, actions: reviewActions(card), markdown: findingToMarkdown(f, { referenceBase: opts.referenceBase }), finding: f };
+  });
+  return { cards, scope: opts.brief ? scopeCheck(opts.brief, changes) : [], blocking: report.blocking };
+}
 export {
   AGENT_CONTEXT_TARGETS,
   BUILTIN_PACKS,
@@ -1803,6 +1821,8 @@ export {
   requestCheckEvent,
   requestGaps,
   resolvePolicy,
+  reviewActions,
+  reviewChange,
   ruleHealth,
   ruleSummary,
   rulesToGuidance,

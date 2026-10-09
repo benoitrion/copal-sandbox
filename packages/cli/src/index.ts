@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges, branchCommits } from "./git";
 
@@ -16,6 +16,7 @@ Usage:
              Hints lead with a question; --show-me reveals fixes, --fix applies pattern fixes (both recorded)
   copal reflect "TASK" [--json] [--skip]                  Navigator: answer up to 3 questions before an AI builds TASK
   copal reflect "TASK" --answers FILE|- [--json]          Non-interactive: answers JSON → agent brief (IDE plugins)
+  copal review [--base REF] [--json]                      Review my change: engine + scope check on the working tree vs base, local only
   copal scope-check [--base REF] [--json]                 Compare the change with .copal/brief.md; ask about anything beyond it (never blocks)
   copal heartbeat FILE [--editor NAME]                    Record IDE activity (adoption)
   copal kata done URL|ID [--rule RULE_ID]                 Record a finished kata (adds it to the library if new)
@@ -314,6 +315,37 @@ async function claudeSessionEnd(input: { transcript_path?: string; cwd?: string 
   return 0;
 }
 
+/** "Review my change": the same hint cards as the PR bot, on the working tree vs base, without a server. */
+function reviewCmd(flags: Flags): number {
+  const root = repoRoot(process.cwd());
+  const repo = loadRepoPolicy(root);
+  const base = defaultBase(root, typeof flags.base === "string" ? flags.base : undefined);
+  const briefPath = path.join(root, ".copal", "brief.md");
+  const brief = fs.existsSync(briefPath) ? fs.readFileSync(briefPath, "utf8") : undefined;
+  const environment = String(flags.env ?? process.env.COPAL_ENV ?? "local");
+  const r = reviewChange(worktreeChanges(root, base), repo.policy, { brief, environment });
+  if (flags.json) {
+    // `findings` keeps the report shape the IDE plugins already parse.
+    console.log(JSON.stringify({ base, blocking: r.blocking, findings: r.cards.map((c) => c.finding), cards: r.cards.map(({ finding, ...c }) => c), scope: r.scope }, null, 2));
+    return 0;
+  }
+  if (!r.cards.length && !r.scope.length) {
+    console.log(green(`✔ Nothing to discuss in this change (vs ${base}).`));
+    return 0;
+  }
+  console.log(bold(`Review my change (vs ${base}) — ${r.cards.length} hint(s)`));
+  for (const c of r.cards) {
+    console.log(`\n${c.blocking ? red("●") : yellow("●")} ${bold(c.title)} ${dim(c.location)}\n  ${c.signal}`);
+    if (c.question) console.log(`  ${cyan("?")} ${c.question}`);
+    console.log(dim(`  ${c.actions.join(" · ")}`));
+  }
+  if (r.scope.length) {
+    console.log(bold("\nBeyond the brief:"));
+    for (const i of r.scope) console.log(`${yellow("?")} ${i.question}`);
+  }
+  return 0;
+}
+
 /** `copal scope-check`: what the change adds beyond the agreed brief, as questions. Always exits 0. */
 function scopeCheckCmd(flags: Flags): number {
   const root = repoRoot(process.cwd());
@@ -492,6 +524,8 @@ async function main(): Promise<number> {
       return kataDone(cmd[2], flags);
     case "scope-check":
       return scopeCheckCmd(flags);
+    case "review":
+      return reviewCmd(flags);
     case "event": {
       const [, ruleId, level, action] = cmd;
       if (!ruleId || !level || !action) return console.error("usage: copal event RULE_ID LEVEL ACTION"), 2;

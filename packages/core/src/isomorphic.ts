@@ -14,3 +14,4 @@ export * from "./smells";
 export * from "./analytics";
 export * from "./request";
 export * from "./scope";
+export * from "./review";
