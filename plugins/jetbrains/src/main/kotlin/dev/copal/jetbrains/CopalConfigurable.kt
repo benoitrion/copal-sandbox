@@ -8,8 +8,8 @@ import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
 
-/** Settings → Tools → Copal.dev */
-class CopalConfigurable : BoundConfigurable("Copal.dev") {
+/** Settings → Tools → Copal */
+class CopalConfigurable : BoundConfigurable("Copal") {
     private val options = CopalSettings.get().state
 
     override fun createPanel(): DialogPanel = panel {
@@ -35,7 +35,7 @@ class CopalConfigurable : BoundConfigurable("Copal.dev") {
                     .comment("Mock backend: http://localhost:4010. Used by “Check Staged Changes” to record evidence; leave empty for local only.")
             }
             row {
-                comment("API key: Tools → Copal.dev → Set API Key… (stored in the IDE password safe)")
+                comment("API key: Tools → Copal → Set API Key… (stored in the IDE password safe)")
             }
         }
     }

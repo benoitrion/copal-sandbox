@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>dev.copal.jetbrains</id>
-    <name>Copal.dev</name>
-    <vendor url="https://copal.lovable.app">Copal.dev</vendor>
+    <name>Copal</name>
+    <vendor url="https://copal.tech">Copal</vendor>
 
     <description><![CDATA[
     <p>Copal is your team's technical coach in the editor. It reads the project-owned <code>.copalrules</code>
@@ -35,7 +35,7 @@
         <externalAnnotator language="TEXT" implementationClass="dev.copal.jetbrains.CopalExternalAnnotator"/>
 
         <applicationConfigurable parentId="tools" instance="dev.copal.jetbrains.CopalConfigurable"
-                                 id="dev.copal.settings" displayName="Copal.dev"/>
+                                 id="dev.copal.settings" displayName="Copal"/>
         <notificationGroup id="Copal.dev" displayType="BALLOON"/>
         <toolWindow id="Copal Task" anchor="right" factoryClass="dev.copal.jetbrains.CopalPairToolWindowFactory"
                     icon="AllIcons.Toolwindows.ToolWindowMessages" canCloseContents="false"/>
@@ -44,7 +44,7 @@
     </extensions>
 
     <actions>
-        <group id="Copal.ToolsMenu" text="Copal.dev" popup="true">
+        <group id="Copal.ToolsMenu" text="Copal" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="Copal.PairOnTask" class="dev.copal.jetbrains.PairOnTaskAction"
                     text="New Task…" description="Agree the task, scope and examples before an AI assistant builds (writes .copal/brief.md)"/>

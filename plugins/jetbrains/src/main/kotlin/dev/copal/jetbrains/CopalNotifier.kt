@@ -15,7 +15,7 @@ object CopalNotifier {
         val n = NotificationGroupManager.getInstance().getNotificationGroup(GROUP).createNotification(content, type)
         if (!details.isNullOrBlank()) {
             n.addAction(NotificationAction.createSimple("Show output") {
-                Messages.showInfoMessage(project, details, "Copal.dev")
+                Messages.showInfoMessage(project, details, "Copal")
             })
         }
         n.notify(project)

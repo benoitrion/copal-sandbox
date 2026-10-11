@@ -1,8 +1,8 @@
 {
   "name": "Copal (sandbox)",
-  "url": "https://copal.lovable.app",
+  "url": "https://copal.tech",
   "hook_attributes": { "url": "https://YOUR-TUNNEL.example.com/webhooks/github" },
-  "redirect_url": "https://copal.lovable.app",
+  "redirect_url": "https://copal.tech",
   "public": false,
   "default_permissions": {
     "pull_requests": "write",

@@ -47,7 +47,7 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
             }
         } catch (e: Exception) {
             LOG.warn("Copal check failed", e)
-            Result(emptyList(), "cannot run the copal CLI (${e.message}). Configure it in Settings → Tools → Copal.dev.")
+            Result(emptyList(), "cannot run the copal CLI (${e.message}). Configure it in Settings → Tools → Copal.")
         }
     }
 

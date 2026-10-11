@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/benoitrion/copal-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/benoitrion/copal-sandbox/actions/workflows/ci.yml)
 
-Un bac à sable complet pour tester [Copal](https://copal.lovable.app) de bout en bout, **sans aucune dépendance npm à l'exécution** (seul TypeScript sert au build).
+Un bac à sable complet pour tester [Copal](https://copal.tech) de bout en bout, **sans aucune dépendance npm à l'exécution** (seul TypeScript sert au build).
 
 > **Copal is a technical mentor inside the IDE — it reviews code while you write it, with or without AI, and helps you ask AI for the right thing.**
 > Product reference: white paper *Copal — The AI Technical Mentor in Your IDE*. Current work: [`docs/plugin-alignment-prompt.md`](docs/plugin-alignment-prompt.md);
@@ -210,7 +210,7 @@ kata) stays attached. Test and code in the same commit, or the test first, is cl
 
 ## Review my change
 
-Before you open a pull request: **VS Code** "Copal: Review my change" and **IntelliJ** Tools › Copal.dev › Review My
+Before you open a pull request: **VS Code** "Copal: Review my change" and **IntelliJ** Tools › Copal › Review My
 Change (or the *Copal Review* tool window) run the engine and the scope check on your change — branch commits,
 uncommitted edits and new files against `origin/main` / `main` / `master` — and show the result as hint cards (same
 content as the PR comments) with **Ask me · Explain · Show me**, plus "Beyond the brief" when `.copal/brief.md` exists.

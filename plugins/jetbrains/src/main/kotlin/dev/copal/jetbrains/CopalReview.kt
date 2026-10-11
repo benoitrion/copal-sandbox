@@ -110,7 +110,7 @@ object CopalReview {
     }
 }
 
-/** Tools → Copal.dev → Review My Change */
+/** Tools → Copal → Review My Change */
 class ReviewMyChangeAction : CopalAction(), DumbAware {
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabled = e.project?.basePath != null

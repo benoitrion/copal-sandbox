@@ -21,10 +21,10 @@ abstract class CopalAction : AnAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 }
 
-/** Tools → Copal.dev → Set API Key… */
+/** Tools → Copal → Set API Key… */
 class SetApiKeyAction : CopalAction() {
     override fun actionPerformed(e: AnActionEvent) {
-        val key = Messages.showPasswordDialog(e.project, "Copal device key (copal_…):", "Copal.dev", null) ?: return
+        val key = Messages.showPasswordDialog(e.project, "Copal device key (copal_…):", "Copal", null) ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
             CopalSettings.apiKey = key.trim().ifEmpty { null }
             CopalNotifier.notify(e.project, if (key.isBlank()) "Copal API key removed." else "Copal API key saved in the password safe.")
@@ -101,7 +101,7 @@ class OpenConsoleAction : CopalAction() {
     }
 }
 
-/** Tools → Copal.dev → Sync Agent Instruction Files: CLAUDE.md, AGENTS.md, Cursor and Copilot get the team's rules. */
+/** Tools → Copal → Sync Agent Instruction Files: CLAUDE.md, AGENTS.md, Cursor and Copilot get the team's rules. */
 class SyncAgentFilesAction : CopalAction() {
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabled = e.project?.basePath != null

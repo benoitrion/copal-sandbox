@@ -134,7 +134,7 @@ object CopalPair {
     }
 }
 
-/** Tools → Copal.dev → Pair on a Task… */
+/** Tools → Copal → Pair on a Task… */
 class PairOnTaskAction : CopalAction() {
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabled = e.project != null
