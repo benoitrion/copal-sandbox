@@ -285,6 +285,8 @@ export interface FormatOptions {
 export declare function formatFinding(f: Finding, opts?: FormatOptions): string;
 export declare function formatReport(r: Report, opts?: FormatOptions): string;
 /** Markdown body for a PR/MR summary comment. */
+/** Findings grouped by rule and file, in report order; blocking findings keep their own group. */
+export declare function groupFindings(findings: Finding[]): Finding[][];
 export declare function reportToMarkdown(r: Report, title?: string): string;
 /**
  * Markdown body for one inline review comment — a hint card: question first, explanation folded,

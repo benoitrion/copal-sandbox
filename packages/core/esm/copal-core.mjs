@@ -1562,14 +1562,24 @@ function formatReport(r, opts = {}) {
   const fopts = { ...opts, showMe: opts.showMe ?? (coaching(r) ? false : void 0) };
   return [head + dim(` \u2014 env ${r.environment}, ${r.filesChecked} file(s), ${r.rulesEvaluated} rule(s)`), "", ...r.findings.map((f) => formatFinding(f, fopts))].join("\n");
 }
+function groupFindings(findings) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const f of findings) {
+    const k = `${f.ruleId}\0${f.file}\0${f.blocking}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)).push(f);
+  }
+  return [...groups.values()];
+}
 function reportToMarkdown(r, title = "Copal check") {
   const status = r.blocking ? "\u{1F534} **Changes requested**" : r.findings.length ? "\u{1F7E1} **Passed with audit findings**" : "\u{1F7E2} **Passed**";
   const out = [`### ${title}`, "", `${status} \u2014 ${r.summary.blocking} blocking \xB7 ${r.summary.audit} audit \xB7 env \`${r.environment}\``, ""];
   if (r.findings.length) {
     out.push("| | Rule | Location | Finding |", "|---|---|---|---|");
-    for (const f of r.findings) {
+    for (const g of groupFindings(r.findings)) {
+      const f = g[0];
       const text = f.coach?.question ? `${f.message} \u2014 _${f.coach.question}_` : f.message;
-      out.push(`| ${f.blocking ? "\u26D4" : f.coach ? "\u{1F4AC}" : "\u26A0\uFE0F"} | \`${f.ruleId}\` | \`${f.file}:${f.line}\` | ${text.replace(/\|/g, "\\|")} |`);
+      const where = g.length > 1 ? `\`${f.file}:${f.line}\` +${g.length - 1} more` : `\`${f.file}:${f.line}\``;
+      out.push(`| ${f.blocking ? "\u26D4" : f.coach ? "\u{1F4AC}" : "\u26A0\uFE0F"} | \`${f.ruleId}\` | ${where} | ${text.replace(/\|/g, "\\|")}${g.length > 1 ? ` (${g.length}\xD7)` : ""} |`);
     }
   }
   out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
@@ -2005,9 +2015,13 @@ function weeklyReportToMarkdown(r, practiceTitle) {
   const arrow = { better: "\u2197 better", worse: "\u2198 worse", stable: "\u2192 stable" };
   const out = [`## Copal team report \xB7 ${r.from.slice(0, 10)} \u2192 ${r.to.slice(0, 10)}`, "", `${r.changes} changes merged. Team level only.`, ""];
   const weekly = Date.parse(r.to) - Date.parse(r.from) <= 7.5 * 864e5;
-  out.push(`| Discipline | Measure | ${weekly ? "This week" : "Value"} | Trend | Status |`, "|---|---|---|---|---|");
-  for (const d of r.disciplines) out.push(`| ${d.name} | ${d.metric} | ${fmt(d.value, d.metric)} | ${d.trend ? arrow[d.trend] : "\u2014"} | ${d.status} |`);
-  out.push("");
+  if (!r.changes) {
+    out.push("No pull request was merged in this period. Copal reads the disciplines from merged pull requests, so work pushed straight to the main branch is not measured. Delivery metrics are below when your data allows.", "");
+  } else {
+    out.push(`| Discipline | Measure | ${weekly ? "This week" : "Value"} | Trend | Status |`, "|---|---|---|---|---|");
+    for (const d of r.disciplines) out.push(`| ${d.name} | ${d.metric} | ${fmt(d.value, d.metric)} | ${d.trend ? arrow[d.trend] : "\u2014"} | ${d.status} |`);
+    out.push("");
+  }
   if (r.focus) {
     const t = practiceTitle?.(r.focus.practice);
     out.push(`### ${weekly ? "This week" : "Start with"}: ${r.focus.name}`, "", r.focus.action, ...t ? ["", `Practice: **${t}**`] : [], "");
@@ -2056,12 +2070,13 @@ function reviewerGuideToMarkdown(g) {
   const first = [];
   if (g.briefUsed) first.push("the task brief (`.copal/brief.md`): is this the right change?");
   first.push(g.tests.length ? `the tests (${g.tests.map((t) => `\`${t}\``).join(", ")}): do they state the business rule?` : "**no test changed**: ask which example proves this change is right");
-  out.push("**1. Read first:** " + first.join("; "));
-  out.push(g.risky.length ? "**2. Then the risky files:**" : "**2. Risky files:** none flagged");
+  out.push("**1. Read first:** " + first.join("; "), "");
+  out.push(g.risky.length ? "**2. Then the risky files:**" : "**2. Risky files:** none flagged", "");
   for (const r of g.risky) out.push(`- \`${r.path}\`: ${r.reasons.join(", ")}`);
-  if (g.rest.length) out.push(`**3. The rest** (${g.rest.length} file${g.rest.length > 1 ? "s" : ""}): a quick read is usually enough when the tests above are convincing.`);
+  if (g.risky.length) out.push("");
+  if (g.rest.length) out.push(`**3. The rest** (${g.rest.length} file${g.rest.length > 1 ? "s" : ""}): a quick read is usually enough when the tests above are convincing.`, "");
   if (g.lowRisk.length) out.push(`_Low risk, skim or skip: ${g.lowRisk.length} file${g.lowRisk.length > 1 ? "s" : ""} (docs, lockfiles, generated)._`);
-  return out.join("\n");
+  return out.join("\n").trim();
 }
 
 // src/request.ts
@@ -2111,16 +2126,20 @@ function requestCheckEvent(prompt) {
 
 // src/scope.ts
 var NOT_STATED = /^\(not stated/i;
-function parseBriefMarkdown(md) {
+function parseBriefMarkdown(raw) {
+  const md = raw.replace(/\*\*([^*]+?)\*\*/g, "$1").replace(/^[-*]\s+(?=\w[\w ]*:)/gm, "");
   const line = (rx) => md.match(rx)?.[1]?.trim();
   const keep = (s) => s && !NOT_STATED.test(s) ? s : void 0;
   const examples = [...md.matchAll(/^\s*-\s*\[([ xX])\]\s+(.+?)\s*$/gm)].map((m) => ({ text: m[2], done: m[1] !== " " }));
   const scope = {};
-  const sin = keep(line(/^Scope in:\s*(.+)$/im));
-  const sout = keep(line(/^Scope out:\s*(.+)$/im));
+  const sin = keep(line(/^(?:Scope in|In scope):\s*(.+)$/im));
+  const sout = keep(line(/^(?:Scope out|Out of scope|Not in scope):\s*(.+)$/im));
+  const done = keep(line(/^(?:Done when|Definition of done):\s*(.+)$/im));
+  if (done && !examples.length) examples.push({ text: done, done: false });
   if (sin) scope.in = sin;
   if (sout) scope.out = sout;
-  return { task: line(/^#\s*Task:\s*(.+)$/im) ?? "", scope, examples, next: line(/^Next:\s*(.+)$/im) };
+  const task = line(/^#\s*Task:\s*(.+)$/im) ?? line(/^(?:Goal|Task):\s*(.+)$/im) ?? line(/^#\s*(?:Brief:\s*)?(.+)$/m) ?? "";
+  return { task, scope, examples, next: line(/^Next:\s*(.+)$/im) };
 }
 var STOP2 = new Set(
   "the and for with from into onto that this then than when what which should must only not don dont touch change changes add adds added new make pass passes error errors test tests spec specs src lib main app index java kotlin ts tsx js jsx mjs cjs kt py go rb cs".split(" ")
@@ -2222,6 +2241,7 @@ export {
   formatReport,
   globToRegExp,
   green,
+  groupFindings,
   hintCard,
   inScope,
   isTestPath,

@@ -29,7 +29,7 @@ function scopeMarkdown(cs: ChangeSet): string | undefined {
   if (!cs.briefText) return undefined;
   const items = scopeCheck(cs.briefText, cs.files);
   if (!items.length) return undefined;
-  return ["#### Beyond the agreed brief", "", ...items.map((i) => `- ${i.question}${i.details.length ? ` _(${i.details.join(", ")})_` : ""}`)].join("\n");
+  return ["#### Beyond the agreed brief", "", ...items.map((i) => `- ${i.question}${i.details.length ? ` _(${i.details.slice(0, 4).join(", ")}${i.details.length > 4 ? `, +${i.details.length - 4} more` : ""})_` : ""}`)].join("\n");
 }
 
 /** Analyze one PR/MR and publish results natively in the Git provider. */
@@ -87,7 +87,9 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       // GitHub/GitLab reject the whole review if an inline comment targets a line outside the diff:
       // inline only findings on added lines; every finding is still listed in the review summary.
       const inDiff = new Set(cs.files.flatMap((f) => f.addedLines.map((l) => `${f.path}:${l.line}`)));
-      const inline = result.findings.filter((f) => inDiff.has(`${f.file}:${f.line}`));
+      // One inline comment per rule and file (its first occurrence); the summary counts the rest.
+      const seen = new Set<string>();
+      const inline = result.findings.filter((f) => inDiff.has(`${f.file}:${f.line}`) && !seen.has(`${f.ruleId}:${f.file}`) && !!seen.add(`${f.ruleId}:${f.file}`));
       try {
         await provider.postReview(cs.headSha, result, inline, scope);
       } catch (e) {

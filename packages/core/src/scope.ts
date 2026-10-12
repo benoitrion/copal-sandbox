@@ -13,16 +13,21 @@ export interface ParsedBrief {
 
 const NOT_STATED = /^\(not stated/i;
 
-export function parseBriefMarkdown(md: string): ParsedBrief {
+export function parseBriefMarkdown(raw: string): ParsedBrief {
+  // Accept Copal's own layout ("Scope in:") and common hand-written ones ("**In scope:**", "Goal:", "Done when:").
+  const md = raw.replace(/\*\*([^*]+?)\*\*/g, "$1").replace(/^[-*]\s+(?=\w[\w ]*:)/gm, "");
   const line = (rx: RegExp) => md.match(rx)?.[1]?.trim();
   const keep = (s?: string) => (s && !NOT_STATED.test(s) ? s : undefined);
   const examples = [...md.matchAll(/^\s*-\s*\[([ xX])\]\s+(.+?)\s*$/gm)].map((m) => ({ text: m[2], done: m[1] !== " " }));
   const scope: ParsedBrief["scope"] = {};
-  const sin = keep(line(/^Scope in:\s*(.+)$/im));
-  const sout = keep(line(/^Scope out:\s*(.+)$/im));
+  const sin = keep(line(/^(?:Scope in|In scope):\s*(.+)$/im));
+  const sout = keep(line(/^(?:Scope out|Out of scope|Not in scope):\s*(.+)$/im));
+  const done = keep(line(/^(?:Done when|Definition of done):\s*(.+)$/im));
+  if (done && !examples.length) examples.push({ text: done, done: false });
   if (sin) scope.in = sin;
   if (sout) scope.out = sout;
-  return { task: line(/^#\s*Task:\s*(.+)$/im) ?? "", scope, examples, next: line(/^Next:\s*(.+)$/im) };
+  const task = line(/^#\s*Task:\s*(.+)$/im) ?? line(/^(?:Goal|Task):\s*(.+)$/im) ?? line(/^#\s*(?:Brief:\s*)?(.+)$/m) ?? "";
+  return { task, scope, examples, next: line(/^Next:\s*(.+)$/im) };
 }
 
 export interface ScopeItem {

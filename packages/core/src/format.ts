@@ -56,14 +56,27 @@ export function formatReport(r: Report, opts: FormatOptions = {}): string {
 }
 
 /** Markdown body for a PR/MR summary comment. */
+/** Findings grouped by rule and file, in report order; blocking findings keep their own group. */
+export function groupFindings(findings: Finding[]): Finding[][] {
+  const groups = new Map<string, Finding[]>();
+  for (const f of findings) {
+    const k = `${f.ruleId}\u0000${f.file}\u0000${f.blocking}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(f);
+  }
+  return [...groups.values()];
+}
+
 export function reportToMarkdown(r: Report, title = "Copal check"): string {
   const status = r.blocking ? "🔴 **Changes requested**" : r.findings.length ? "🟡 **Passed with audit findings**" : "🟢 **Passed**";
   const out = [`### ${title}`, "", `${status} — ${r.summary.blocking} blocking · ${r.summary.audit} audit · env \`${r.environment}\``, ""];
   if (r.findings.length) {
     out.push("| | Rule | Location | Finding |", "|---|---|---|---|");
-    for (const f of r.findings) {
+    // One row per rule and file: repeats of the same hint are counted, not listed (noise makes people stop reading).
+    for (const g of groupFindings(r.findings)) {
+      const f = g[0];
       const text = f.coach?.question ? `${f.message} — _${f.coach.question}_` : f.message;
-      out.push(`| ${f.blocking ? "⛔" : f.coach ? "💬" : "⚠️"} | \`${f.ruleId}\` | \`${f.file}:${f.line}\` | ${text.replace(/\|/g, "\\|")} |`);
+      const where = g.length > 1 ? `\`${f.file}:${f.line}\` +${g.length - 1} more` : `\`${f.file}:${f.line}\``;
+      out.push(`| ${f.blocking ? "⛔" : f.coach ? "💬" : "⚠️"} | \`${f.ruleId}\` | ${where} | ${text.replace(/\|/g, "\\|")}${g.length > 1 ? ` (${g.length}×)` : ""} |`);
     }
   }
   out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");

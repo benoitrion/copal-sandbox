@@ -42,10 +42,11 @@ export function reviewerGuideToMarkdown(g: ReviewerGuide): string {
   const first: string[] = [];
   if (g.briefUsed) first.push("the task brief (`.copal/brief.md`): is this the right change?");
   first.push(g.tests.length ? `the tests (${g.tests.map((t) => `\`${t}\``).join(", ")}): do they state the business rule?` : "**no test changed**: ask which example proves this change is right");
-  out.push("**1. Read first:** " + first.join("; "));
-  out.push(g.risky.length ? "**2. Then the risky files:**" : "**2. Risky files:** none flagged");
+  out.push("**1. Read first:** " + first.join("; "), "");
+  out.push(g.risky.length ? "**2. Then the risky files:**" : "**2. Risky files:** none flagged", "");
   for (const r of g.risky) out.push(`- \`${r.path}\`: ${r.reasons.join(", ")}`);
-  if (g.rest.length) out.push(`**3. The rest** (${g.rest.length} file${g.rest.length > 1 ? "s" : ""}): a quick read is usually enough when the tests above are convincing.`);
+  if (g.risky.length) out.push("");
+  if (g.rest.length) out.push(`**3. The rest** (${g.rest.length} file${g.rest.length > 1 ? "s" : ""}): a quick read is usually enough when the tests above are convincing.`, "");
   if (g.lowRisk.length) out.push(`_Low risk, skim or skip: ${g.lowRisk.length} file${g.lowRisk.length > 1 ? "s" : ""} (docs, lockfiles, generated)._`);
-  return out.join("\n");
+  return out.join("\n").trim();
 }
