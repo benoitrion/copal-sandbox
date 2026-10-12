@@ -225,9 +225,13 @@ export function weeklyReportToMarkdown(r: WeeklyReport, practiceTitle?: (id: str
   const arrow = { better: "↗ better", worse: "↘ worse", stable: "→ stable" } as const;
   const out = [`## Copal team report · ${r.from.slice(0, 10)} → ${r.to.slice(0, 10)}`, "", `${r.changes} changes merged. Team level only.`, ""];
   const weekly = Date.parse(r.to) - Date.parse(r.from) <= 7.5 * 864e5;
+  if (!r.changes) {
+    out.push("No pull request was merged in this period. Copal reads the disciplines from merged pull requests, so work pushed straight to the main branch is not measured. Delivery metrics are below when your data allows.", "");
+  } else {
   out.push(`| Discipline | Measure | ${weekly ? "This week" : "Value"} | Trend | Status |`, "|---|---|---|---|---|");
   for (const d of r.disciplines) out.push(`| ${d.name} | ${d.metric} | ${fmt(d.value, d.metric)} | ${d.trend ? arrow[d.trend] : "—"} | ${d.status} |`);
   out.push("");
+  }
   if (r.focus) {
     const t = practiceTitle?.(r.focus.practice);
     out.push(`### ${weekly ? "This week" : "Start with"}: ${r.focus.name}`, "", r.focus.action, ...(t ? ["", `Practice: **${t}**`] : []), "");

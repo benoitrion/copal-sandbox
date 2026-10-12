@@ -72,3 +72,9 @@ test("tracks: variants replace default rungs; focus follows the track", () => {
   assert.equal(weeklyReport({ pulls: tie, now, track: "agents" }).focus!.discipline, "scope");
   assert.equal(weeklyReport({ pulls: tie, now, track: "legacy" }).focus!.discipline, "examples");
 });
+
+test("weekly: an empty period says so instead of a table of unknowns", () => {
+  const md = weeklyReportToMarkdown(weeklyReport({ pulls: [], now }));
+  assert.match(md, /No pull request was merged/);
+  assert.ok(!md.includes("| Examples first"));
+});
