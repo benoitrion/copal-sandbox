@@ -1756,20 +1756,24 @@ function groupFindings(findings) {
   return [...groups.values()];
 }
 function reportToMarkdown(r, title = "Copal check") {
-  const status = r.blocking ? "\u{1F534} **Changes requested**" : r.findings.length ? "\u{1F7E1} **Passed with audit findings**" : "\u{1F7E2} **Passed**";
-  const out = [`### ${title}`, "", `${status} \u2014 ${r.summary.blocking} blocking \xB7 ${r.summary.audit} audit \xB7 env \`${r.environment}\``, ""];
-  if (r.findings.length) {
-    out.push("| Risk | Rule | Location | Finding |", "|---|---|---|---|");
-    const order = { high: 0, medium: 1, low: 2 };
-    for (const g of groupFindings(r.findings).sort((a, b) => (order[a[0].risk ?? "low"] ?? 3) - (order[b[0].risk ?? "low"] ?? 3))) {
-      const f = g[0];
-      const advice = f.fixText && (f.kind === "Complexity" || f.kind === "Duplication") ? ` **Suggestion:** ${f.fixText}` : "";
-      const text = (f.coach?.question ? `${f.message} \u2014 _${f.coach.question}_` : f.message) + advice;
-      const where = g.length > 1 ? `\`${f.file}:${f.line}\` +${g.length - 1} more` : `\`${f.file}:${f.line}\``;
-      const risk = f.blocking ? "\u26D4 Blocking" : f.risk === "high" ? "\u{1F534} High" : f.risk === "medium" ? "\u{1F7E0} Medium" : "\u26AA Low";
-      out.push(`| ${risk}${f.kind ? `<br><sub>${f.kind}</sub>` : ""} | \`${f.ruleId}\` | ${where} | ${text.replace(/\|/g, "\\|")}${g.length > 1 ? ` (${g.length}\xD7)` : ""} |`);
-    }
-  }
+  const order = { high: 0, medium: 1, low: 2 };
+  const rank = (f) => f.blocking ? -1 : order[f.risk ?? "low"] ?? 3;
+  const byRule = /* @__PURE__ */ new Map();
+  for (const f of r.findings) (byRule.get(f.ruleId) ?? byRule.set(f.ruleId, []).get(f.ruleId)).push(f);
+  const groups = [...byRule.values()].map((g) => g.sort((a, b) => rank(a) - rank(b))).sort((a, b) => rank(a[0]) - rank(b[0]) || b.length - a.length);
+  const status = r.blocking ? "\u{1F534} **Changes requested**" : r.findings.length ? `\u{1F7E1} **${groups.length} thing${groups.length > 1 ? "s" : ""} to look at**` : "\u{1F7E2} **Passed**";
+  const out = [`### ${title}`, "", `${status}${r.blocking ? ` \u2014 ${r.summary.blocking} blocking` : ""}`, ""];
+  const TOP = 5;
+  groups.slice(0, TOP).forEach((g, i) => {
+    const f = g[0];
+    const risk = f.blocking ? "\u26D4 Blocking" : f.risk === "high" ? "\u{1F534} High" : f.risk === "medium" ? "\u{1F7E0} Medium" : "\u26AA Low";
+    const files = [...new Set(g.map((x) => x.file))];
+    const where = `\`${f.file}:${f.line}\`${files.length > 1 ? ` and ${files.length - 1} other file${files.length > 2 ? "s" : ""}` : ""}${g.length > 1 ? ` \xB7 ${g.length}\xD7` : ""}`;
+    out.push(`${i + 1}. ${risk}${f.kind ? ` \xB7 ${f.kind}` : ""} \u2014 **${f.message}**`, `   ${where}`);
+    if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication")) out.push(`   Suggestion: ${f.fixText}`);
+    else if (f.coach?.question) out.push(`   _${f.coach.question}_`);
+  });
+  if (groups.length > TOP) out.push("", `<sub>+${groups.length - TOP} lower-risk rule${groups.length - TOP > 1 ? "s" : ""} (${groups.slice(TOP).reduce((n, g) => n + g.length, 0)} findings) in the inline comments.</sub>`);
   out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
   return out.join("\n");
 }

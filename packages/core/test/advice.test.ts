@@ -32,6 +32,6 @@ test("every finding carries a risk and a family; the PR comment ranks by risk an
   assert.deepEqual([d.risk, d.kind], ["medium", "Duplication"]);
   const md = reportToMarkdown(r);
   assert.ok(md.indexOf("🔴 High") < md.indexOf("🟠 Medium"));
-  assert.match(md, /\*\*Suggestion:\*\* It is repeated in/);
+  assert.match(md, /Suggestion: It is repeated in/);
   assert.deepEqual(classify({ id: "x", pattern: "x", risk: "low", kind: "Tests" }, "security", "error", true), { risk: "low", kind: "Tests" });
 });

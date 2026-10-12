@@ -29,11 +29,12 @@ test("scope: in-scope file is not flagged, out-of-scope file is", () => {
   assert.match(items[0].question, /brief says not to touch/);
 });
 
-test("report: repeated findings of one rule in one file are one row with a count", () => {
+test("report: one line per rule, with where it is and how often", () => {
   const f = (line: number): Finding => ({ ruleId: "no-explicit-any", category: "quality", severity: "warning", mode: "audit", blocking: false, file: "src/a.ts", line, message: "Explicit any" } as Finding);
   const findings = [f(3), f(11), f(19), { ...f(1), file: "src/b.ts" }];
   assert.equal(groupFindings(findings).length, 2);
   const md = reportToMarkdown({ environment: "ci", policyMode: "coach", findings, blocking: false, summary: { total: 4, blocking: 0, audit: 4, byCategory: {} }, filesChecked: 2, rulesEvaluated: 1 } as Report);
-  assert.match(md, /`src\/a\.ts:3` \+2 more/);
-  assert.match(md, /\(3×\)/);
+  assert.match(md, /1 thing to look at/);
+  assert.match(md, /`src\/a\.ts:3` and 1 other file · 4×/);
+  assert.doesNotMatch(md, /\|/);
 });
