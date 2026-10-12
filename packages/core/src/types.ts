@@ -69,6 +69,8 @@ export interface Rule {
   smell?: { kind: "long-function" | "deep-nesting" | "too-many-params" | "large-file" | "duplicated-literal"; max?: number };
   /** Changes to `paths` must come with a changed test file matching this template ({name}, {dir}). */
   requireTest?: { test: string };
+  /** Small, verified steps: the whole change (all in-scope files) should stay under `maxLines` changed lines and `maxFiles` files. */
+  changeSize?: { maxLines?: number; maxFiles?: number };
 }
 
 export interface RedactPattern {

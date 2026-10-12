@@ -112,6 +112,8 @@ export function rulesToGuidance(rules: Rule[], filePath?: string): string {
           ? "Never hard-code credentials; read them from configuration/secret manager."
           : r.requireTest
             ? `Add/update a test matching ${r.requireTest.test}`
+            : r.changeSize
+              ? `Keep each change small: under ${r.changeSize.maxLines ?? "any number of"} lines and ${r.changeSize.maxFiles ?? "any number of"} files — split larger work into verified steps`
             : r.smell
               ? `Avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}`
               : r.message ?? `Avoid pattern /${r.pattern}/`;

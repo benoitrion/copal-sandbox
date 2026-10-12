@@ -80,6 +80,11 @@ export interface Rule {
     requireTest?: {
         test: string;
     };
+    /** Small, verified steps: the whole change (all in-scope files) should stay under `maxLines` changed lines and `maxFiles` files. */
+    changeSize?: {
+        maxLines?: number;
+        maxFiles?: number;
+    };
 }
 export interface RedactPattern {
     name: string;
@@ -234,6 +239,11 @@ export declare function parseDeny(deny: string): {
     to: string[];
 };
 export declare function mask(s: string): string;
+/** Small, verified steps: one finding for the whole change when it exceeds the rule's line or file budget. */
+export declare function changeSizeOf(rule: Rule, files: FileChange[]): {
+    lines: number;
+    files: number;
+};
 export interface RedactionResult {
     text: string;
     redactions: {

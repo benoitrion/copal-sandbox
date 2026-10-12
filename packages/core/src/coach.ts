@@ -283,6 +283,7 @@ export function ruleSummary(r: Rule): string {
   if (r.secrets) return "no hard-coded credentials";
   if (r.dependencies) return `dependencies allowed: ${r.dependencies.allow?.join(", ") || "any"}`;
   if (r.requireTest) return `changes need a test matching ${r.requireTest.test}`;
+  if (r.changeSize) return `keep each change under ${r.changeSize.maxLines ?? "∞"} lines and ${r.changeSize.maxFiles ?? "∞"} files`;
   if (r.smell) return `avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}`;
   return r.message ?? r.why ?? `avoid /${r.pattern}/`;
 }

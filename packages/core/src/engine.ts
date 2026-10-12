@@ -32,6 +32,10 @@ export function evaluate(changes: FileChange[], policy: Policy, opts: EvaluateOp
       findings.push(...checkRequireTest(rule, files));
       continue;
     }
+    if (rule.changeSize) {
+      findings.push(...checkChangeSize(rule, files));
+      continue;
+    }
     for (const file of files) {
       if (!inScope(file.path, rule.paths, rule.exclude)) continue;
       let found: Finding[] = [];
@@ -230,6 +234,24 @@ function checkRequireTest(rule: Rule, files: FileChange[]): Finding[] {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------- change size
+/** Small, verified steps: one finding for the whole change when it exceeds the rule's line or file budget. */
+export function changeSizeOf(rule: Rule, files: FileChange[]): { lines: number; files: number } {
+  const own = files.filter((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude));
+  return { lines: own.reduce((n, f) => n + f.addedLines.length, 0), files: own.length };
+}
+
+function checkChangeSize(rule: Rule, files: FileChange[]): Finding[] {
+  const { maxLines, maxFiles } = rule.changeSize!;
+  const size = changeSizeOf(rule, files);
+  const over: string[] = [];
+  if (maxLines && size.lines > maxLines) over.push(`${size.lines} lines (budget ${maxLines})`);
+  if (maxFiles && size.files > maxFiles) over.push(`${size.files} files (budget ${maxFiles})`);
+  if (!over.length) return [];
+  const first = files.find((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude))!;
+  return [base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info")];
 }
 
 // ---------------------------------------------------------------- redaction

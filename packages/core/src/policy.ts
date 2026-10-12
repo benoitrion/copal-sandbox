@@ -110,6 +110,22 @@ export const BUILTIN_PACKS: Record<string, Policy> = {
           learningHour: "test-first-small-steps",
         },
       },
+      {
+        id: "change-size",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        changeSize: { maxLines: 400, maxFiles: 12 },
+        exclude: ["**/*.lock", "**/package-lock.json", "**/pnpm-lock.yaml", "**/yarn.lock", "**/*.snap", "**/generated/**", "**/dist/**"],
+        why: "Small changes are easier to test, review and undo, and keep an AI assistant from drifting.",
+        coach: {
+          question: "What is the smallest step you could verify on its own?",
+          reference: "https://martinfowler.com/articles/branching-patterns.html#healthy-branch",
+          kata: `${SAMMAN}/string_calculator.html`,
+          learningHour: "test-first-small-steps",
+        },
+        fix: "Split the change: one behaviour (with its test) per change, then the wiring, then the UI.",
+      },
     ],
   },
   hexagonal: {
@@ -274,7 +290,7 @@ export interface ValidationIssue {
   message: string;
 }
 
-const KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell"] as const;
+const KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell", "changeSize"] as const;
 const SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal"];
 
 export function validatePolicy(p: Policy): ValidationIssue[] {
@@ -297,6 +313,7 @@ export function validatePolicy(p: Policy): ValidationIssue[] {
     if (r.mode && !["audit", "enforce", "off"].includes(r.mode)) issues.push({ ruleId: r.id, message: `invalid mode "${r.mode}"` });
     if (r.deny && !/\s->\s/.test(r.deny)) issues.push({ ruleId: r.id, message: 'deny must look like "from/** -> to/**"' });
     if (r.smell && !SMELL_KINDS.includes(r.smell.kind)) issues.push({ ruleId: r.id, message: `unknown smell "${r.smell.kind}" (${SMELL_KINDS.join(", ")})` });
+    if (r.changeSize && !(Number(r.changeSize.maxLines ?? 1) >= 1 && Number(r.changeSize.maxFiles ?? 1) >= 1)) issues.push({ ruleId: r.id, message: "changeSize.maxLines and maxFiles must be ≥ 1" });
     if (r.smell?.max !== undefined && !(Number(r.smell.max) >= 1)) issues.push({ ruleId: r.id, message: "smell.max must be ≥ 1" });
     if (r.coach?.question && containsCode(r.coach.question)) issues.push({ ruleId: r.id, message: "coach.question must not contain code — ask, don't answer" });
     if (r.coach?.escalateAfter !== undefined && !(r.coach.escalateAfter >= 1)) issues.push({ ruleId: r.id, message: "coach.escalateAfter must be ≥ 1" });

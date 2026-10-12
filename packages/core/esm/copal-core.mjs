@@ -503,6 +503,7 @@ function ruleSummary(r) {
   if (r.secrets) return "no hard-coded credentials";
   if (r.dependencies) return `dependencies allowed: ${r.dependencies.allow?.join(", ") || "any"}`;
   if (r.requireTest) return `changes need a test matching ${r.requireTest.test}`;
+  if (r.changeSize) return `keep each change under ${r.changeSize.maxLines ?? "\u221E"} lines and ${r.changeSize.maxFiles ?? "\u221E"} files`;
   if (r.smell) return `avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}`;
   return r.message ?? r.why ?? `avoid /${r.pattern}/`;
 }
@@ -689,6 +690,22 @@ var BUILTIN_PACKS = {
           kata: `${SAMMAN}/string_calculator.html`,
           learningHour: "test-first-small-steps"
         }
+      },
+      {
+        id: "change-size",
+        category: "quality",
+        mode: "audit",
+        severity: "info",
+        changeSize: { maxLines: 400, maxFiles: 12 },
+        exclude: ["**/*.lock", "**/package-lock.json", "**/pnpm-lock.yaml", "**/yarn.lock", "**/*.snap", "**/generated/**", "**/dist/**"],
+        why: "Small changes are easier to test, review and undo, and keep an AI assistant from drifting.",
+        coach: {
+          question: "What is the smallest step you could verify on its own?",
+          reference: "https://martinfowler.com/articles/branching-patterns.html#healthy-branch",
+          kata: `${SAMMAN}/string_calculator.html`,
+          learningHour: "test-first-small-steps"
+        },
+        fix: "Split the change: one behaviour (with its test) per change, then the wiring, then the UI."
       }
     ]
   },
@@ -847,7 +864,7 @@ var BUILTIN_REDACT = [
     flags: "i"
   }
 ];
-var KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell"];
+var KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell", "changeSize"];
 var SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal"];
 function validatePolicy(p) {
   const issues = [];
@@ -869,6 +886,7 @@ function validatePolicy(p) {
     if (r.mode && !["audit", "enforce", "off"].includes(r.mode)) issues.push({ ruleId: r.id, message: `invalid mode "${r.mode}"` });
     if (r.deny && !/\s->\s/.test(r.deny)) issues.push({ ruleId: r.id, message: 'deny must look like "from/** -> to/**"' });
     if (r.smell && !SMELL_KINDS.includes(r.smell.kind)) issues.push({ ruleId: r.id, message: `unknown smell "${r.smell.kind}" (${SMELL_KINDS.join(", ")})` });
+    if (r.changeSize && !(Number(r.changeSize.maxLines ?? 1) >= 1 && Number(r.changeSize.maxFiles ?? 1) >= 1)) issues.push({ ruleId: r.id, message: "changeSize.maxLines and maxFiles must be \u2265 1" });
     if (r.smell?.max !== void 0 && !(Number(r.smell.max) >= 1)) issues.push({ ruleId: r.id, message: "smell.max must be \u2265 1" });
     if (r.coach?.question && containsCode(r.coach.question)) issues.push({ ruleId: r.id, message: "coach.question must not contain code \u2014 ask, don't answer" });
     if (r.coach?.escalateAfter !== void 0 && !(r.coach.escalateAfter >= 1)) issues.push({ ruleId: r.id, message: "coach.escalateAfter must be \u2265 1" });
@@ -1259,6 +1277,10 @@ function evaluate(changes, policy, opts = {}) {
       findings.push(...checkRequireTest(rule, files));
       continue;
     }
+    if (rule.changeSize) {
+      findings.push(...checkChangeSize(rule, files));
+      continue;
+    }
     for (const file of files) {
       if (!inScope(file.path, rule.paths, rule.exclude)) continue;
       let found = [];
@@ -1435,6 +1457,20 @@ function checkRequireTest(rule, files) {
   }
   return out;
 }
+function changeSizeOf(rule, files) {
+  const own = files.filter((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude));
+  return { lines: own.reduce((n, f) => n + f.addedLines.length, 0), files: own.length };
+}
+function checkChangeSize(rule, files) {
+  const { maxLines, maxFiles } = rule.changeSize;
+  const size = changeSizeOf(rule, files);
+  const over = [];
+  if (maxLines && size.lines > maxLines) over.push(`${size.lines} lines (budget ${maxLines})`);
+  if (maxFiles && size.files > maxFiles) over.push(`${size.files} files (budget ${maxFiles})`);
+  if (!over.length) return [];
+  const first = files.find((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude));
+  return [base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info")];
+}
 function redact(text, policy) {
   const counts = /* @__PURE__ */ new Map();
   let out = text;
@@ -1573,7 +1609,7 @@ function rulesToGuidance(rules, filePath) {
   if (!rules.length) return `No Copal rules apply${filePath ? ` to ${filePath}` : ""}.`;
   const out = [`Copal engineering policy${filePath ? ` for ${filePath}` : ""} \u2014 follow these rules when writing code:`, ""];
   for (const r of rules) {
-    const what = r.deny ? `Do not import across: ${r.deny}` : r.dependencies ? `Dependencies \u2014 allowed: ${r.dependencies.allow?.join(", ") || "any"}; denied: ${r.dependencies.deny?.join(", ") || "none"}` : r.secrets ? "Never hard-code credentials; read them from configuration/secret manager." : r.requireTest ? `Add/update a test matching ${r.requireTest.test}` : r.smell ? `Avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}` : r.message ?? `Avoid pattern /${r.pattern}/`;
+    const what = r.deny ? `Do not import across: ${r.deny}` : r.dependencies ? `Dependencies \u2014 allowed: ${r.dependencies.allow?.join(", ") || "any"}; denied: ${r.dependencies.deny?.join(", ") || "none"}` : r.secrets ? "Never hard-code credentials; read them from configuration/secret manager." : r.requireTest ? `Add/update a test matching ${r.requireTest.test}` : r.changeSize ? `Keep each change small: under ${r.changeSize.maxLines ?? "any number of"} lines and ${r.changeSize.maxFiles ?? "any number of"} files \u2014 split larger work into verified steps` : r.smell ? `Avoid ${r.smell.kind.replace(/-/g, " ")}${r.smell.max ? ` (max ${r.smell.max})` : ""}` : r.message ?? `Avoid pattern /${r.pattern}/`;
     const fix = typeof r.fix === "string" ? r.fix : r.fix?.with;
     out.push(`- [${r.mode === "enforce" ? "ENFORCED" : "audit"}] ${r.id}: ${what}${r.why ? ` \u2014 ${r.why}` : ""}${fix ? ` (preferred: ${fix})` : ""}`);
     if (r.coach?.question) out.push(`  Ask the developer before writing this kind of code: "${r.coach.question}"`);
@@ -1784,6 +1820,7 @@ export {
   briefToMarkdown,
   briefToText,
   buildBrief,
+  changeSizeOf,
   containsCode,
   cyan,
   detectSmell,
