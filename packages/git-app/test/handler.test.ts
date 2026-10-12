@@ -99,3 +99,32 @@ test("PR findings count as 'shown' hints for the PR author (growth), best effort
   await runCheck(provider, client);
   assert.deepEqual(sent.map((e) => [e.developer, e.source, e.action, e.ruleId, e.project]), [["ana", "pr", "shown", "ledger-rounding", "billing-api"]]);
 });
+
+test("PR review stays quiet: low-risk hints are summary-only, inline comments are never repeated, an unchanged re-push posts nothing", async () => {
+  const { runCheck } = require("../src/handler");
+  const files = [{ path: "src/a.ts", status: "added", addedLines: [{ line: 1, text: "x" }, { line: 2, text: "y" }] }];
+  const findings = [
+    { ruleId: "ledger-rounding", file: "src/a.ts", line: 1, risk: "medium", blocking: false, message: "Inline rounding" },
+    { ruleId: "no-explicit-any", file: "src/a.ts", line: 2, risk: "low", blocking: false, message: "any" },
+  ];
+  const state = { reviews: [] as string[], inline: [] as { path: string; body: string }[] };
+  const run = async () => {
+    let posted: { inline: string[] } | undefined;
+    const provider = {
+      name: "github", label: "a/b#1",
+      load: async () => ({ files, headSha: "abc", title: "t", author: "a", policyText: "version: 4\nrules: []\n", ref: "a/b#1" }),
+      setStatus: async () => undefined,
+      previousCopal: async () => state,
+      postReview: async (_s: string, _r: unknown, f: { ruleId: string; file: string }[], extra?: string) => {
+        posted = { inline: f.map((x) => x.ruleId) };
+        state.reviews.push(`Copal ${extra}`);
+        f.forEach((x) => state.inline.push({ path: x.file, body: `Copal \`${x.ruleId}\`` }));
+      },
+      comment: async () => undefined,
+    };
+    await runCheck(provider, { analyze: async () => ({ findings, blocking: false, summary: { blocking: 0, audit: 2 }, environment: "ci", mode: "local" }) });
+    return posted;
+  };
+  assert.deepEqual((await run())!.inline, ["ledger-rounding"], "low risk stays out of inline comments");
+  assert.equal(await run(), undefined, "same findings on a re-push: no new review");
+});

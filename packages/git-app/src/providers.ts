@@ -21,6 +21,8 @@ export interface GitProvider {
   load(): Promise<ChangeSet>;
   setStatus(sha: string, state: CheckState, description: string): Promise<void>;
   postReview(sha: string, report: Report, findings: Finding[], extraMarkdown?: string): Promise<void>;
+  /** Bodies of reviews and inline comments Copal already posted on this change (to avoid repeating itself). */
+  previousCopal?(): Promise<{ reviews: string[]; inline: { path: string; body: string }[] }>;
   comment(body: string): Promise<void>;
   /** Commits of the PR/MR, oldest first, with the paths each touched (tests-first check). Optional, best effort. */
   commits?(): Promise<{ sha: string; files: string[] }[]>;
@@ -147,6 +149,17 @@ export class GitHubProvider implements GitProvider {
         comments: findings.map((f) => ({ path: f.file, line: f.line, side: "RIGHT", body: findingToMarkdown(f, { referenceBase: this.blobBase(sha) }) })),
       }),
     });
+  }
+
+  async previousCopal() {
+    const headers = await this.h();
+    const reviews = (await (await http(this.api(`/pulls/${this.number}/reviews?per_page=100`), { headers })).json()) as any[];
+    const inline = (await (await http(this.api(`/pulls/${this.number}/comments?per_page=100`), { headers })).json()) as any[];
+    const mine = (b?: string) => !!b && /Copal/.test(b);
+    return {
+      reviews: reviews.map((r) => r.body as string).filter(mine),
+      inline: inline.filter((c) => mine(c.body)).map((c) => ({ path: c.path as string, body: c.body as string })),
+    };
   }
 
   async readFile(p: string, ref = "HEAD"): Promise<string | undefined> {

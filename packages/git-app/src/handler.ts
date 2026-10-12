@@ -78,8 +78,8 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       const policy = resolvePolicy(parsePolicy(cs.policyText));
       const outOfScope = cs.briefText ? scopeCheck(cs.briefText, cs.files).map((i) => i.file) : undefined;
       const g = reviewerGuide({ files: cs.files, findings: result.findings, policy, outOfScope, briefUsed: !!cs.briefText });
-      // Only when there is something to steer: a clean, in-scope change gets no extra comment.
-      if (scope || result.findings.length || g.risky.length) scope = (scope ? `${scope}\n\n` : "") + reviewerGuideToMarkdown(g);
+      // Only when the findings don't already say where to look: the ranked list is the guide.
+      if (!result.findings.length && (scope || g.risky.length)) scope = (scope ? `${scope}\n\n` : "") + reviewerGuideToMarkdown(g);
     } catch (e) {
       log(`${provider.label}: reviewer guide unavailable (${(e as Error).message})`);
     }
@@ -88,8 +88,27 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       // inline only findings on added lines; every finding is still listed in the review summary.
       const inDiff = new Set(cs.files.flatMap((f) => f.addedLines.map((l) => `${f.path}:${l.line}`)));
       // One inline comment per rule and file (its first occurrence); the summary counts the rest.
+      // Low-risk hints stay in the summary: inline comments are for what a reviewer must look at.
       const seen = new Set<string>();
-      const inline = result.findings.filter((f) => inDiff.has(`${f.file}:${f.line}`) && !seen.has(`${f.ruleId}:${f.file}`) && !!seen.add(`${f.ruleId}:${f.file}`));
+      let previous: { reviews: string[]; inline: { path: string; body: string }[] } = { reviews: [], inline: [] };
+      try {
+        if (provider.previousCopal) previous = await provider.previousCopal();
+      } catch (e) {
+        log(`${provider.label}: previous comments unavailable (${(e as Error).message})`);
+      }
+      // Never repeat an inline comment already on this change (same rule, same file).
+      for (const c of previous.inline) {
+        const m = /`([\w-]+)`/.exec(c.body);
+        if (m) seen.add(`${m[1]}:${c.path}`);
+      }
+      const inline = result.findings.filter((f) => (f.blocking || f.risk === "high" || f.risk === "medium") && inDiff.has(`${f.file}:${f.line}`) && !seen.has(`${f.ruleId}:${f.file}`) && !!seen.add(`${f.ruleId}:${f.file}`));
+      // Same findings as the last review and nothing new inline: update the status only, no new notification.
+      const fingerprint = `<!-- copal:${[...new Set(result.findings.map((f) => `${f.ruleId}:${f.file}`))].sort().join(",")}${scope ? ":" + scope.length : ""} -->`;
+      if (!inline.length && previous.reviews.some((b) => b.includes(fingerprint))) {
+        await provider.setStatus(cs.headSha, result.blocking ? "failure" : "success", desc);
+        return result;
+      }
+      scope = (scope ? `${scope}\n\n` : "") + fingerprint;
       try {
         await provider.postReview(cs.headSha, result, inline, scope);
       } catch (e) {
