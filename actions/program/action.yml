@@ -18,13 +18,15 @@ runs:
   using: composite
   steps:
     - uses: actions/setup-node@v4
-      with: { node-version: 20 }
+      with: { node-version: 22 }
     - name: Build Copal
       shell: bash
       working-directory: ${{ github.action_path }}/../..
       run: |
-        npm ci --no-audit --no-fund --loglevel=error
-        npm run build --silent
+        log="$(mktemp)"
+        if ! { npm ci --no-audit --no-fund --loglevel=error && npm run build --silent; } >"$log" 2>&1; then
+          cat "$log"; echo "::error title=Copal build failed::$(tail -c 1500 "$log" | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; exit 1
+        fi
     - name: Run
       shell: bash
       env:
