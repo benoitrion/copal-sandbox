@@ -127,6 +127,7 @@ declare module "vscode" {
   export interface ExtensionContext {
     readonly subscriptions: { dispose(): any }[];
     readonly secrets: SecretStorage;
+    readonly workspaceState?: { get<T>(key: string): T | undefined; update(key: string, value: unknown): Thenable<void> };
   }
   export interface InputBoxOptions {
     title?: string;

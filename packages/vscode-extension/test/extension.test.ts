@@ -292,3 +292,12 @@ test("Create the test writes a first example to fill in, next to the code", () =
   assert.match(s, /import \* as subject from "\.\/reminders"/);
   assert.match(s, /first example/);
 });
+
+test("one-click AI setup: detects out-of-date instruction files; the block carries the plan check", () => {
+  const ext = require("../src/extension");
+  const { agentContextBlock, parsePolicy, resolvePolicy } = require("@copal/core");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "copal-agent-"));
+  const policy = resolvePolicy(parsePolicy("version: 4\nproject: demo\nrules:\n  - id: no-todo\n    pattern: TODO\n    coach:\n      question: Should this be a ticket?\n"));
+  assert.ok(ext.agentFilesOutOfDate(dir, policy).includes("CLAUDE.md"));
+  assert.match(agentContextBlock(policy, "demo"), /### Before you write code[\s\S]*short plan/);
+});

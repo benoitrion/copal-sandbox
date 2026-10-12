@@ -477,6 +477,7 @@ function buildBrief(policy, task, questions, answers, skipped = false, opts = {}
   return brief;
 }
 var EXAMPLES_FIRST = "Write the agreed examples as failing tests first, show them, and wait for the developer's OK before implementing. Then implement in small steps until they pass \u2014 nothing beyond the examples.";
+var PLAN_CHECK = "Start with a short plan: the files you will touch and why, which rules above apply to each, and the first example you will write as a test. If a file is outside the agreed scope or a step would break a rule, ask the developer before writing any code.";
 var REPORT_RULE = "End every task with two lists: Assumptions I made that you didn't state, and Things I added beyond the agreed examples.";
 function briefToMarkdown(b) {
   const out = [`# Task: ${b.task}`, ""];
@@ -564,12 +565,15 @@ function agentContextBlock(policy, project) {
   }
   lines.push(
     "",
+    "### Before you write code",
+    `- ${PLAN_CHECK}`,
+    "",
     "### How to work",
     "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong.",
     `- ${EXAMPLES_FIRST}`,
     `- ${REPORT_RULE}`,
     "- If `.copal/brief.md` exists, it holds the agreed task, scope and examples.",
-    "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
+    "- When the copal CLI or the copal_check_staged MCP tool is available, run it on your change before committing.",
     CONTEXT_END
   );
   return lines.join("\n");
@@ -1533,6 +1537,23 @@ function testOrderFindings(policy, commits, environment = "ci") {
   }
   return out;
 }
+function changedLineSet(head, current) {
+  if (head === void 0) return null;
+  const before = /* @__PURE__ */ new Map();
+  for (const l of head.split(/\r?\n/)) before.set(l, (before.get(l) ?? 0) + 1);
+  const out = /* @__PURE__ */ new Set();
+  current.split(/\r?\n/).forEach((l, i) => {
+    const n = before.get(l) ?? 0;
+    if (n > 0) before.set(l, n - 1);
+    else out.add(i + 1);
+  });
+  return out;
+}
+function onChangedLines(findings, policy, file, changed) {
+  if (!changed) return findings.filter((f) => f.file === file);
+  const fileLevel = new Set(policy.rules.filter((r) => r.requireTest || r.changeSize).map((r) => r.id));
+  return findings.filter((f) => f.file === file && (changed.has(f.line) || fileLevel.has(f.ruleId) && changed.size > 0));
+}
 
 // src/format.ts
 var useColor = () => typeof process !== "undefined" && !!process.stdout?.isTTY && !process.env?.NO_COLOR;
@@ -2223,6 +2244,7 @@ export {
   LADDER,
   LATE_SOURCES,
   NEXT_ACTIONS,
+  PLAN_CHECK,
   POLICY_FILE,
   REPORT_RULE,
   SMELL_DEFAULTS,
@@ -2238,6 +2260,7 @@ export {
   briefToText,
   buildBrief,
   changeSizeOf,
+  changedLineSet,
   concreteTestPath,
   containsCode,
   cyan,
@@ -2267,6 +2290,7 @@ export {
   navigatorQuestions,
   nextPractice,
   normalizePath,
+  onChangedLines,
   parseBriefMarkdown,
   parseDeny,
   parsePolicy,

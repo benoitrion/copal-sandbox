@@ -273,6 +273,13 @@ export interface CommitFiles {
  * coaching (explanation, reference, kata) stays attached for the ladder. `commits` is oldest first.
  */
 export declare function testOrderFindings(policy: Policy, commits: CommitFiles[], environment?: string): Finding[];
+/**
+ * Lines (1-based) of `current` that are not in `head` (the committed version), matched as a multiset so moved
+ * lines don't count. `head` undefined (new or uncommitted file) → null: every line is new.
+ */
+export declare function changedLineSet(head: string | undefined, current: string): Set<number> | null;
+/** Keeps findings on changed lines; file-level rules (tests with the change, change size) only when the file changed. */
+export declare function onChangedLines(findings: Finding[], policy: Policy, file: string, changed: Set<number> | null): Finding[];
 
 // ---- format
 export declare const red: (s: string) => string;

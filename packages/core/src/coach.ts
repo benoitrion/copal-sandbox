@@ -250,6 +250,10 @@ export function buildBrief(policy: Policy | undefined, task: string, questions: 
 export const EXAMPLES_FIRST =
   "Write the agreed examples as failing tests first, show them, and wait for the developer's OK before implementing. Then implement in small steps until they pass — nothing beyond the examples.";
 
+/** The plan check: the assistant checks its plan against the team rules before it writes any code. */
+export const PLAN_CHECK =
+  "Start with a short plan: the files you will touch and why, which rules above apply to each, and the first example you will write as a test. If a file is outside the agreed scope or a step would break a rule, ask the developer before writing any code.";
+
 /** The end-of-task report, shared by the brief, the Claude Code hook and the sync-context block. */
 export const REPORT_RULE =
   "End every task with two lists: Assumptions I made that you didn't state, and Things I added beyond the agreed examples.";
@@ -372,12 +376,15 @@ export function agentContextBlock(policy: Policy, project?: string): string {
   }
   lines.push(
     "",
+    "### Before you write code",
+    `- ${PLAN_CHECK}`,
+    "",
     "### How to work",
     "- For a feature-sized task, first ask: the first concrete example (it becomes the first failing test), where the code belongs, and what could go wrong.",
     `- ${EXAMPLES_FIRST}`,
     `- ${REPORT_RULE}`,
     "- If `.copal/brief.md` exists, it holds the agreed task, scope and examples.",
-    "- Run `copal check --staged` (or the copal_check_staged MCP tool) before committing.",
+    "- When the copal CLI or the copal_check_staged MCP tool is available, run it on your change before committing.",
     CONTEXT_END,
   );
   return lines.join("\n");

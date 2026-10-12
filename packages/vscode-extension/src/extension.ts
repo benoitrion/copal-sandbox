@@ -481,10 +481,58 @@ async function pair() {
 const rootOf = new Map<string, string>();
 
 /** Write the team's rules into CLAUDE.md, AGENTS.md, Cursor and Copilot instruction files (managed block). */
-async function syncAgentFiles() {
+/** Instruction files that would change if the team rules were written into them now. */
+export function agentFilesOutOfDate(root: string, policy: Policy): string[] {
+  const block = agentContextBlock(policy, policy.project);
+  return Object.values(AGENT_CONTEXT_TARGETS)
+    .filter((t) => {
+      const file = path.join(root, t.file);
+      const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+      return mergeManagedBlock(current, block, t.header) !== current;
+    })
+    .map((t) => t.file);
+}
+
+/** One click: on opening a project with team rules, offer to give every AI assistant the rules and the plan check. */
+async function offerAgentSetup(ctx: vscode.ExtensionContext) {
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    let loaded;
+    try {
+      loaded = loadPolicy(folder.uri.fsPath);
+    } catch {
+      continue;
+    }
+    const stale = agentFilesOutOfDate(loaded.root, loaded.policy);
+    const key = `copal.agentSetup.${loaded.root}`;
+    if (!stale.length || ctx.workspaceState?.get(key) === "never") continue;
+    const pick = await vscode.window.showInformationMessage(
+      "Copal: give your AI assistants (Copilot, Claude Code, Cursor) your team rules, so they check their plan before writing code?",
+      "Set up",
+      "Not now",
+      "Never for this project",
+    );
+    if (pick === "Set up") await syncAgentFiles(loaded.root);
+    if (pick === "Never for this project") await ctx.workspaceState?.update(key, "never");
+  }
+}
+
+async function syncAgentFiles(rootArg?: string) {
+  if (typeof rootArg === "string") {
+    try {
+      const loaded = loadPolicy(rootArg);
+      return writeAgentFiles(loaded.root, loaded.policy);
+    } catch {
+      return vscode.window.showWarningMessage("Copal: no .copalrules found.");
+    }
+  }
   const d = vscode.window.activeTextEditor?.document ?? vscode.workspace.textDocuments.find((x) => policyFor(x));
   const p = d ? policyFor(d) : null;
   if (!p) return vscode.window.showWarningMessage("Copal: open a file under a .copalrules first.");
+  return writeAgentFiles(p.root, p.policy);
+}
+
+function writeAgentFiles(root: string, policy: Policy) {
+  const p = { root, policy };
   const block = agentContextBlock(p.policy, p.policy.project);
   const changed: string[] = [];
   for (const t of Object.values(AGENT_CONTEXT_TARGETS)) {
@@ -572,6 +620,7 @@ export function activate(ctx: vscode.ExtensionContext) {
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   status.command = "copal.showRules";
 
+  setTimeout(() => void offerAgentSetup(ctx).catch(() => undefined), 1500);
   let timer: ReturnType<typeof setTimeout> | undefined;
   ctx.subscriptions.push(
     diagnostics,
