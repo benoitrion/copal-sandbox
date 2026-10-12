@@ -18,7 +18,7 @@ Usage:
   copal reflect "TASK" --answers FILE|- [--json]          Non-interactive: answers JSON → agent brief (IDE plugins)
   copal review [--base REF] [--json]                      Review my change: engine + scope check on the working tree vs base, local only
   copal scope-check [--base REF] [--json]                 Compare the change with .copal/brief.md; ask about anything beyond it (never blocks)
-  copal weekly --repo OWNER/NAME [--out DIR] [--json]    Weekly team report: disciplines, delivery (DORA where data allows), next practice
+  copal weekly --repo OWNER/NAME [--track new-products|legacy|agents] [--out DIR] [--json]  Weekly team report: disciplines, delivery (DORA where data allows), next practice
   copal heartbeat FILE [--editor NAME]                    Record IDE activity (adoption)
   copal kata done URL|ID [--rule RULE_ID]                 Record a finished kata (adds it to the library if new)
   copal event RULE_ID LEVEL ACTION [--source ide]         Record a hint-ladder step (0-4; shown|ask|explain|show_me|skipped|answered)
@@ -551,7 +551,7 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
     const is: any[] = await get(`/repos/${repo}/issues?labels=${encodeURIComponent(String(flags.incidentLabel || "incident"))}&state=all&since=${new Date(since).toISOString()}&per_page=100`);
     incidents = is.length ? is.map((i) => ({ openedAt: i.created_at, resolvedAt: i.closed_at ?? undefined })) : undefined;
   } catch { incidents = undefined; }
-  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), deployments, incidents, dismissals, now });
+  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), deployments, incidents, dismissals, track: (["new-products", "legacy", "agents"] as const).find((t) => t === flags.track), now });
   if (flags.json) return console.log(JSON.stringify(report, null, 2)), 0;
   const md = weeklyReportToMarkdown(report, (id) => { const p = practice(id); return p && `${p.title} (${p.where}, ${p.minutes} min) — ${p.goal}`; });
   if (typeof flags.out === "string") {

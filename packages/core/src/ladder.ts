@@ -6,6 +6,15 @@
  */
 import type { DisciplineId, Level } from "./weekly";
 
+export type Track = "new-products" | "legacy" | "agents";
+
+/** Tracks: the team's situation. They choose which disciplines to start with and swap in exercises that fit. */
+export const TRACKS: Record<Track, { name: string; summary: string; emphasis: Practice["discipline"][] }> = {
+  "new-products": { name: "New products", summary: "Build with AI from day one, without losing structure.", emphasis: ["examples", "steps", "scope"] },
+  legacy: { name: "Legacy code", summary: "Change existing systems safely: pin down behaviour first, then change in small steps.", emphasis: ["examples", "scope", "steps"] },
+  agents: { name: "AI agents", summary: "Keep agents inside a clear brief, one slice of the system, and reviewed steps.", emphasis: ["scope", "steps", "examples"] },
+};
+
 export interface Practice {
   id: string;
   discipline: Exclude<DisciplineId, "review">;
@@ -19,6 +28,8 @@ export interface Practice {
   /** Optional exercise repository or description (credited to its authors). */
   kata?: { name: string; url: string; credit: string };
   minutes: number;
+  /** Track variant: replaces the default practice of the same discipline and rung for these tracks. */
+  tracks?: Track[];
 }
 
 const PRACTICES: Practice[] = [
@@ -91,21 +102,76 @@ const PRACTICES: Practice[] = [
   },
 ];
 
+/** Track variants: same discipline and rung, an exercise that fits the team's situation. */
+const VARIANTS: Practice[] = [
+  {
+    id: "legacy-examples-2", tracks: ["legacy"], where: "your code", discipline: "examples", rung: 2, minutes: 60,
+    title: "Pin down behaviour before any change",
+    goal: "Never let the AI change old code that no test describes.",
+    steps: ["Before your next change to old code, write tests for what it does today.", "Include the odd cases you find, even if they look wrong.", "Only then ask the AI for the change, and keep the tests."],
+    doneWhen: "A real change to old code lands with the tests that protected it.",
+  },
+  {
+    id: "legacy-steps-2", tracks: ["legacy"], where: "your code", discipline: "steps", rung: 2, minutes: 60,
+    title: "Refactor in tiny steps",
+    goal: "Change old code one safe move at a time.",
+    steps: ["With the tests green, make one small refactoring (rename, extract, move).", "Run the tests and commit.", "Ask the AI for one move at a time, never a rewrite."],
+    doneWhen: "A messy function was improved through several green commits.",
+    kata: { name: "Gilded Rose", url: "https://github.com/emilybache/GildedRose-Refactoring-Kata", credit: "Emily Bache" },
+  },
+  {
+    id: "agents-scope-2", tracks: ["agents"], where: "your code", discipline: "scope", rung: 2, minutes: 30,
+    title: "Brief every agent task",
+    goal: "An agent gets a goal, a scope and a definition of done before it starts.",
+    steps: ["Write the brief: goal, in scope, out of scope, done when.", "Ask the agent for a plan and review it before any code.", "Run Copal's scope check on the result."],
+    doneWhen: "Three agent tasks in a row stayed inside their brief.",
+  },
+  {
+    id: "agents-steps-2", tracks: ["agents"], where: "your code", discipline: "steps", rung: 2, minutes: 45,
+    title: "Agents work in reviewed steps",
+    goal: "Stop the agent after each verified step instead of reviewing one big result.",
+    steps: ["Ask the agent to stop when one test passes.", "Read that diff and commit it.", "Only then let it continue with the next step."],
+    doneWhen: "An agent task landed as several small, reviewed commits.",
+  },
+  {
+    id: "agents-examples-2", tracks: ["agents"], where: "your code", discipline: "examples", rung: 2, minutes: 45,
+    title: "Tests are the agent's contract",
+    goal: "The agent implements your examples and may not change them.",
+    steps: ["Write the tests yourself first.", "Tell the agent it must not edit test files.", "Reject any change that touches them."],
+    doneWhen: "An agent change passed tests it did not write or modify.",
+  },
+];
+
 const ORDER = ["examples", "scope", "steps"];
 export const LADDER: Practice[] = [...PRACTICES].sort((a, b) => ORDER.indexOf(a.discipline) - ORDER.indexOf(b.discipline) || a.rung - b.rung);
 
 export function practice(id: string): Practice | undefined {
-  return LADDER.find((p) => p.id === id);
+  return LADDER.find((p) => p.id === id) ?? VARIANTS.find((p) => p.id === id);
+}
+
+/** The practice for a discipline and rung, using the track's variant when there is one. */
+export function practiceAt(discipline: Practice["discipline"], rung: 1 | 2 | 3, track?: Track): Practice {
+  return (track && VARIANTS.find((p) => p.discipline === discipline && p.rung === rung && p.tracks!.includes(track))) || LADDER.find((p) => p.discipline === discipline && p.rung === rung)!;
+}
+
+/** The whole ladder as a team on this track sees it. */
+export function ladderFor(track?: Track): Practice[] {
+  return LADDER.map((p) => practiceAt(p.discipline, p.rung, track));
 }
 
 /** Starting rung from a discipline's status: needs practice → 1, fair → 2, strong → 3. */
-export function startingPractice(discipline: Practice["discipline"], status: Level): Practice {
+export function startingPractice(discipline: Practice["discipline"], status: Level, track?: Track): Practice {
   const rung = status === "strong" ? 3 : status === "fair" ? 2 : 1;
-  return LADDER.find((p) => p.discipline === discipline && p.rung === rung)!;
+  return practiceAt(discipline, rung, track);
 }
 
 /** Next rung after `id` is done, or undefined at the top. */
-export function nextPractice(id: string): Practice | undefined {
+export function nextPractice(id: string, track?: Track): Practice | undefined {
   const p = practice(id);
-  return p && LADDER.find((q) => q.discipline === p.discipline && q.rung === p.rung + 1);
+  return p && p.rung < 3 ? practiceAt(p.discipline, (p.rung + 1) as 2 | 3, track ?? p.tracks?.[0]) : undefined;
+}
+
+/** Among equally weak disciplines, the track decides which to start with. */
+export function trackRank(track: Track | undefined, discipline: Practice["discipline"]): number {
+  return track ? TRACKS[track].emphasis.indexOf(discipline) : 0;
 }

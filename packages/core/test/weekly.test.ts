@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { LADDER, nextPractice, practice, startingPractice, weeklyReport, weeklyReportToMarkdown } from "../src";
+import { LADDER, ladderFor, nextPractice, practice, practiceAt, startingPractice, TRACKS, weeklyReport, weeklyReportToMarkdown } from "../src";
 import type { PullRecord } from "../src";
 
 const now = Date.parse("2026-10-12T12:00:00Z");
@@ -57,4 +57,18 @@ test("ladder: three rungs per discipline, start and next", () => {
   assert.equal(startingPractice("scope", "strong").id, "scope-3");
   assert.equal(nextPractice("steps-1")!.id, "steps-2");
   assert.equal(nextPractice("steps-3"), undefined);
+});
+
+test("tracks: variants replace default rungs; focus follows the track", () => {
+  assert.equal(practiceAt("scope", 2).id, "scope-2");
+  assert.equal(practiceAt("scope", 2, "agents").id, "agents-scope-2");
+  assert.equal(practiceAt("examples", 2, "legacy").id, "legacy-examples-2");
+  assert.equal(ladderFor("agents").length, 9);
+  assert.equal(nextPractice("agents-scope-2", "agents")!.id, "scope-3");
+  assert.equal(nextPractice("scope-1", "agents")!.id, "agents-scope-2");
+  assert.deepEqual(Object.keys(TRACKS), ["new-products", "legacy", "agents"]);
+  // two equally weak disciplines: the agents track starts with scope
+  const tie = [pr(1, 600, false, 2), pr(2, 600, false, 2)].map((p) => ({ ...p, files: [...p.files, ...Array.from({ length: 13 }, (_, i) => ({ filename: `src/f${i}.ts`, additions: 1, deletions: 0 }))] }));
+  assert.equal(weeklyReport({ pulls: tie, now, track: "agents" }).focus!.discipline, "scope");
+  assert.equal(weeklyReport({ pulls: tie, now, track: "legacy" }).focus!.discipline, "examples");
 });

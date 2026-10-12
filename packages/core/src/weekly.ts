@@ -3,7 +3,7 @@
  * where the data allows, and one next action per slipping discipline. Pure — the caller fetches the data.
  * Team level only: no author appears in the output.
  */
-import { startingPractice } from "./ladder";
+import { startingPractice, trackRank, type Track } from "./ladder";
 
 export interface PullRecord {
   number: number;
@@ -141,6 +141,8 @@ export function weeklyReport(input: {
   incidents?: IncidentRecord[];
   /** Hints dismissed as false positives (`/copal false-positive RULE`, `copal-ignore`). */
   dismissals?: { ruleId: string; at: string }[];
+  /** The team's track: breaks ties between equally weak disciplines and picks track-specific exercises. */
+  track?: Track;
   now?: number;
   days?: number;
 }): WeeklyReport {
@@ -201,9 +203,9 @@ export function weeklyReport(input: {
 
   // Focus: the weakest discipline, a worsening one first among equals
   const rank: Record<Level, number> = { "needs practice": 0, fair: 1, strong: 2, unknown: 3 };
-  const pick = [...disciplines].sort((a, b) => rank[a.status] - rank[b.status] || Number(b.trend === "worse") - Number(a.trend === "worse"))[0];
+  const pick = [...disciplines].sort((a, b) => rank[a.status] - rank[b.status] || Number(b.trend === "worse") - Number(a.trend === "worse") || (a.id === "review" || b.id === "review" ? 0 : trackRank(input.track, a.id) - trackRank(input.track, b.id)))[0];
   const focus = pick && pick.status !== "strong" && pick.status !== "unknown"
-    ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status).id }
+    ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status, input.track).id }
     : null;
 
   const counts = new Map<string, number>();
