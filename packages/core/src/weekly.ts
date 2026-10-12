@@ -95,7 +95,7 @@ export function disciplineMetrics(pulls: PullRecord[]) {
       code++;
       if (fs.some((f) => isTestPath(f.filename))) withTests++;
     }
-    const others = (p.reviews ?? []).filter((r) => r.author && r.author !== p.author && r.submittedAt).map((r) => Date.parse(r.submittedAt!)).sort((a, b) => a - b);
+    const others = (p.reviews ?? []).filter((r) => r.author && r.author !== p.author && !/\[bot\]$|^github-actions$/i.test(r.author) && r.submittedAt).map((r) => Date.parse(r.submittedAt!)).sort((a, b) => a - b);
     if (others.length) firstReview.push(Math.max(0, (others[0] - Date.parse(p.createdAt)) / H));
     else unreviewed++;
     if (p.outOfScope !== undefined) { scoped++; if (p.outOfScope > 0) outOfScope++; }
