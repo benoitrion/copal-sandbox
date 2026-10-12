@@ -1647,14 +1647,14 @@ function ruleHealth(input) {
     const r = rows.get(rule.id) ?? { hits: 0, recent: 0, earlier: 0, late: 0, fp: 0 };
     const caughtLate = r.hits ? r.late / r.hits : null;
     const falsePositiveRate = r.hits ? Math.min(1, r.fp / r.hits) : null;
-    const trend = r.recent > r.earlier ? "up" : r.recent < r.earlier ? "down" : "flat";
+    const trend2 = r.recent > r.earlier ? "up" : r.recent < r.earlier ? "down" : "flat";
     const status = [];
     if ((falsePositiveRate ?? 0) >= 0.2 && r.hits >= 3) status.push("noisy");
-    if (r.hits >= 3 && trend !== "down") status.push("recurring");
+    if (r.hits >= 3 && trend2 !== "down") status.push("recurring");
     if ((caughtLate ?? 0) >= 0.5 && r.hits >= 2) status.push("caught-late");
     if (!seen90.has(rule.id)) status.push("silent");
     if (!rule.coach?.question) status.push("uncoached");
-    return { ruleId: rule.id, mode: rule.mode ?? "audit", hits: r.hits, trend, caughtLate, falsePositiveRate, lastSeen: r.lastSeen ?? null, status, kata: rule.coach?.kata ?? null };
+    return { ruleId: rule.id, mode: rule.mode ?? "audit", hits: r.hits, trend: trend2, caughtLate, falsePositiveRate, lastSeen: r.lastSeen ?? null, status, kata: rule.coach?.kata ?? null };
   });
   return { project: project ?? null, days, rules: out.sort((a, b) => b.status.length - a.status.length || b.hits - a.hits) };
 }
@@ -1678,6 +1678,243 @@ function reach(input) {
     agents,
     navigator: { sessions: nav.length, answered: nav.filter((n) => n.answeredAt && !n.skipped).length, skipped: nav.filter((n) => n.skipped).length }
   };
+}
+
+// src/ladder.ts
+var LADDER = [
+  {
+    id: "examples-1",
+    discipline: "examples",
+    rung: 1,
+    minutes: 45,
+    title: "Test first on a small kata",
+    goal: "Feel the loop: example, failing test, code, green.",
+    steps: ["Pick the first requirement of the kata.", "Write it as a failing test.", "Make it pass with the simplest code.", "Repeat for the next requirement, without the AI."],
+    doneWhen: "Every requirement has a test written before its code.",
+    kata: { name: "String Calculator", url: "https://sammancoaching.org/kata_descriptions/string_calculator.html", credit: "Roy Osherove \xB7 Samman Coaching" }
+  },
+  {
+    id: "examples-2",
+    discipline: "examples",
+    rung: 2,
+    minutes: 60,
+    title: "Tests first, AI implements",
+    goal: "Use examples as the AI's specification.",
+    steps: ["Write the examples for one business rule as tests.", "Ask your AI assistant to make them pass, and nothing else.", "Reject any code no test asked for.", "Compare the result with a prompt-only attempt."],
+    doneWhen: "The AI's change passes your tests and adds no untested behaviour.",
+    kata: { name: "Supermarket Receipt", url: "https://github.com/emilybache/SupermarketReceipt-Refactoring-Kata", credit: "Emily Bache" }
+  },
+  {
+    id: "examples-3",
+    discipline: "examples",
+    rung: 3,
+    minutes: 90,
+    title: "Pin down legacy behaviour",
+    goal: "Write characterisation tests before letting AI change old code.",
+    steps: ["Choose a module your team is afraid to touch.", "Record what it does today as tests, including odd cases.", "Only then ask the AI for the change.", "Keep the tests in the change."],
+    doneWhen: "A real change to legacy code lands with the tests that protected it.",
+    kata: { name: "Gilded Rose", url: "https://github.com/emilybache/GildedRose-Refactoring-Kata", credit: "Emily Bache" }
+  },
+  {
+    id: "scope-1",
+    discipline: "scope",
+    rung: 1,
+    minutes: 30,
+    title: "One-line brief",
+    goal: "Agree the scope before the first prompt.",
+    steps: ["Before your next task, write: goal, in scope, out of scope.", "Give the brief to the AI with the task.", "Run Copal's scope check before review."],
+    doneWhen: "Three changes in a row with no out-of-scope question."
+  },
+  {
+    id: "scope-2",
+    discipline: "scope",
+    rung: 2,
+    minutes: 60,
+    title: "Give the AI only one slice",
+    goal: "Limit the context to the module the change belongs to.",
+    steps: ["Find the boundary of the module you are changing.", "Give the AI only that module and its tests.", "If it needs another module, stop and decide whether that is a separate change."],
+    doneWhen: "The change touches one module and its tests.",
+    kata: { name: "Theatrical Players", url: "https://github.com/emilybache/Theatrical-Players-Refactoring-Kata", credit: "Emily Bache" }
+  },
+  {
+    id: "scope-3",
+    discipline: "scope",
+    rung: 3,
+    minutes: 90,
+    title: "Draw a boundary as a team rule",
+    goal: "Turn an architecture decision into a rule Copal checks.",
+    steps: ["Pick one dependency that should never happen (for example, UI to database).", "Write it as a deny rule in .copalrules, with the question to ask.", "Fix or justify the existing violations."],
+    doneWhen: "The rule runs on every change and the team agrees with its question."
+  },
+  {
+    id: "steps-1",
+    discipline: "steps",
+    rung: 1,
+    minutes: 45,
+    title: "Split a change in three",
+    goal: "See that a feature can land as several small, safe changes.",
+    steps: ["Take your next feature.", "Plan it as: rule and its test, then the wiring, then the screen.", "Submit each part as its own change."],
+    doneWhen: "Each part is under 400 lines and was reviewed on its own."
+  },
+  {
+    id: "steps-2",
+    discipline: "steps",
+    rung: 2,
+    minutes: 60,
+    title: "Commit on every green",
+    goal: "Work in steps small enough to undo without thinking.",
+    steps: ["Run the tests after each small edit, by you or the AI.", "Commit every time they pass.", "Revert instead of debugging when a step goes red."],
+    doneWhen: "A session with a commit every few minutes and no long red phase.",
+    kata: { name: "Gilded Rose", url: "https://github.com/emilybache/GildedRose-Refactoring-Kata", credit: "Emily Bache" }
+  },
+  {
+    id: "steps-3",
+    discipline: "steps",
+    rung: 3,
+    minutes: 90,
+    title: "Ship behind a flag",
+    goal: "Merge unfinished work safely instead of growing a big branch.",
+    steps: ["Put the new behaviour behind a flag that is off.", "Merge small steps daily.", "Turn it on when the last step is verified."],
+    doneWhen: "A feature reached production as several merged steps."
+  }
+];
+function practice(id) {
+  return LADDER.find((p) => p.id === id);
+}
+function startingPractice(discipline, status) {
+  const rung = status === "strong" ? 3 : status === "fair" ? 2 : 1;
+  return LADDER.find((p) => p.discipline === discipline && p.rung === rung);
+}
+function nextPractice(id) {
+  const p = practice(id);
+  return p && LADDER.find((q) => q.discipline === p.discipline && q.rung === p.rung + 1);
+}
+
+// src/weekly.ts
+var TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|testing)\/|[._-](test|spec)s?\.[a-z0-9]+$|Tests?\.(java|kt|cs|scala|swift)$|_test\.(go|py|rb|exs?)$|(^|\/)test_[^/]+\.py$/i;
+var IGNORED = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|poetry\.lock|go\.sum|composer\.lock|Gemfile\.lock)$|\.(min\.js|map|snap|svg|png|jpe?g|gif|ico|pdf)$|(^|\/)(dist|build|vendor|node_modules|generated)\//i;
+var DOC = /\.(md|mdx|rst|txt|adoc)$/i;
+var H = 36e5;
+var isTestPath = (p) => TEST_PATH.test(p);
+function median(xs) {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function disciplineMetrics(pulls) {
+  let code = 0, withTests = 0, unreviewed = 0, big = 0, scoped = 0, outOfScope = 0;
+  const sizes = [], files = [], firstReview = [];
+  for (const p of pulls) {
+    const fs = p.files.filter((f) => !IGNORED.test(f.filename));
+    const size = fs.reduce((n2, f) => n2 + f.additions + f.deletions, 0);
+    sizes.push(size);
+    files.push(fs.length);
+    if (size > 400) big++;
+    if (fs.some((f) => !isTestPath(f.filename) && !DOC.test(f.filename))) {
+      code++;
+      if (fs.some((f) => isTestPath(f.filename))) withTests++;
+    }
+    const others = (p.reviews ?? []).filter((r) => r.author && r.author !== p.author && r.submittedAt).map((r) => Date.parse(r.submittedAt)).sort((a, b) => a - b);
+    if (others.length) firstReview.push(Math.max(0, (others[0] - Date.parse(p.createdAt)) / H));
+    else unreviewed++;
+    if (p.outOfScope !== void 0) {
+      scoped++;
+      if (p.outOfScope > 0) outOfScope++;
+    }
+  }
+  const n = pulls.length;
+  return {
+    changes: n,
+    testsWithCode: code ? withTests / code : null,
+    medianFiles: median(files),
+    outOfScopeShare: scoped ? outOfScope / scoped : null,
+    medianSize: median(sizes),
+    bigShare: n ? big / n : null,
+    medianFirstReviewH: median(firstReview),
+    unreviewedShare: n ? unreviewed / n : null
+  };
+}
+function level(v, good, bad, higherIsBetter) {
+  if (v == null) return "unknown";
+  if (higherIsBetter) return v >= good ? "strong" : v < bad ? "needs practice" : "fair";
+  return v <= good ? "strong" : v > bad ? "needs practice" : "fair";
+}
+function trend(v, prev, higherIsBetter, tolerance) {
+  if (v == null || prev == null) return null;
+  const d = v - prev;
+  if (Math.abs(d) <= tolerance) return "stable";
+  return d > 0 === higherIsBetter ? "better" : "worse";
+}
+var NEXT_ACTIONS = {
+  examples: { action: 'Before asking the AI for code, write the examples as tests. Reviewers ask "which test shows this?" on changes without one.', practice: "examples-1" },
+  scope: { action: "Write a one-line task brief (in scope / out of scope) before each change, and split out anything outside it.", practice: "scope-1" },
+  steps: { action: "Keep each change to one behaviour and its test. Split anything over 400 lines before review.", practice: "steps-1" },
+  review: { action: "Agree a review slot twice a day, and no merge without a second pair of eyes.", practice: "steps-1" }
+};
+function weeklyReport(input) {
+  const now = input.now ?? Date.now();
+  const days = input.days ?? 7;
+  const from = now - days * 864e5;
+  const inWindow = (t) => {
+    const x = Date.parse(t);
+    return x >= from && x <= now;
+  };
+  const pulls = input.pulls.filter((p2) => inWindow(p2.mergedAt));
+  const m = disciplineMetrics(pulls);
+  const p = input.previous ? disciplineMetrics(input.previous) : null;
+  const steps = level(m.medianSize, 200, 400, false);
+  const review = (m.unreviewedShare ?? 0) > 0.3 ? "needs practice" : level(m.medianFirstReviewH, 8, 48, false);
+  const scopeValue = m.outOfScopeShare ?? m.medianFiles;
+  const disciplines = [
+    { id: "examples", name: "Examples first", metric: "Code changes with tests", value: m.testsWithCode, previous: p?.testsWithCode ?? null, trend: trend(m.testsWithCode, p?.testsWithCode ?? null, true, 0.05), status: level(m.testsWithCode, 0.75, 0.5, true) },
+    m.outOfScopeShare != null ? { id: "scope", name: "Controlled scope", metric: "Changes going beyond their brief", value: scopeValue, previous: p?.outOfScopeShare ?? null, trend: trend(scopeValue, p?.outOfScopeShare ?? null, false, 0.05), status: level(scopeValue, 0.1, 0.3, false) } : { id: "scope", name: "Controlled scope", metric: "Files per change (median)", value: scopeValue, previous: p?.medianFiles ?? null, trend: trend(scopeValue, p?.medianFiles ?? null, false, 1), status: level(scopeValue, 5, 12, false) },
+    { id: "steps", name: "Small, verified steps", metric: "Lines per change (median)", value: m.medianSize, previous: p?.medianSize ?? null, trend: trend(m.medianSize, p?.medianSize ?? null, false, 25), status: steps !== "needs practice" && (m.bigShare ?? 0) > 0.3 ? "fair" : steps },
+    { id: "review", name: "Review flow", metric: "Hours to first review (median)", value: m.medianFirstReviewH, previous: p?.medianFirstReviewH ?? null, trend: trend(m.medianFirstReviewH, p?.medianFirstReviewH ?? null, false, 2), status: review }
+  ];
+  const deploys = (input.deployments ?? []).filter((d) => inWindow(d.at)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const lead = pulls.map((pr) => {
+    const start = Date.parse(pr.firstCommitAt ?? pr.createdAt);
+    const merged = Date.parse(pr.mergedAt);
+    const next = deploys.find((d) => Date.parse(d.at) >= merged);
+    return ((next ? Date.parse(next.at) : merged) - start) / H;
+  });
+  const delivery = [
+    { name: "Lead time for changes", value: median(lead), unit: "hours (median)", note: deploys.length ? "First commit to deployment" : "First commit to merge: no deployment data, so time to production is not included" }
+  ];
+  if (deploys.length) {
+    delivery.push({ name: "Deployment frequency", value: deploys.length / days, unit: "per day" });
+    delivery.push({ name: "Change failure rate", value: deploys.filter((d) => d.failed).length / deploys.length, unit: "share of deployments" });
+  } else {
+    delivery.push({ name: "Deployment frequency", value: null, unit: "per day", note: "Not measured: publish deployments or releases to include it" });
+    delivery.push({ name: "Change failure rate", value: null, unit: "share of deployments", note: "Not measured: needs deployment data" });
+  }
+  const restored = (input.incidents ?? []).filter((i) => i.resolvedAt && inWindow(i.resolvedAt));
+  delivery.push(restored.length ? { name: "Time to restore service", value: median(restored.map((i) => (Date.parse(i.resolvedAt) - Date.parse(i.openedAt)) / H)), unit: "hours (median)" } : { name: "Time to restore service", value: null, unit: "hours (median)", note: input.incidents ? "No incident resolved this week" : "Not measured: label incidents to include it" });
+  const rank = { "needs practice": 0, fair: 1, strong: 2, unknown: 3 };
+  const pick = [...disciplines].sort((a, b) => rank[a.status] - rank[b.status] || Number(b.trend === "worse") - Number(a.trend === "worse"))[0];
+  const focus = pick && pick.status !== "strong" && pick.status !== "unknown" ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status).id } : null;
+  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus };
+}
+function fmt(v, metric) {
+  if (v == null) return "\u2014";
+  if (/with tests|beyond|share/i.test(metric)) return `${Math.round(v * 100)}%`;
+  return String(Math.round(v * 10) / 10);
+}
+function weeklyReportToMarkdown(r, practiceTitle) {
+  const arrow = { better: "\u2197 better", worse: "\u2198 worse", stable: "\u2192 stable" };
+  const out = [`## Copal weekly report \xB7 ${r.from.slice(0, 10)} \u2192 ${r.to.slice(0, 10)}`, "", `${r.changes} changes merged. Team level only.`, ""];
+  out.push("| Discipline | Measure | This week | Trend | Status |", "|---|---|---|---|---|");
+  for (const d of r.disciplines) out.push(`| ${d.name} | ${d.metric} | ${fmt(d.value, d.metric)} | ${d.trend ? arrow[d.trend] : "\u2014"} | ${d.status} |`);
+  out.push("");
+  if (r.focus) {
+    const t = practiceTitle?.(r.focus.practice);
+    out.push(`### This week: ${r.focus.name}`, "", r.focus.action, ...t ? ["", `Practice: **${t}**`] : [], "");
+  }
+  out.push("### Delivery", "", "| Metric | Value | Note |", "|---|---|---|");
+  for (const d of r.delivery) out.push(`| ${d.name} | ${d.value == null ? "\u2014" : d.unit.startsWith("share") ? `${Math.round(d.value * 100)}%` : `${Math.round(d.value * 100) / 100} ${d.unit}`} | ${d.note ?? ""} |`);
+  out.push("", "_Delivery metrics follow DORA's definitions where the data allows._");
+  return out.join("\n");
 }
 
 // src/request.ts
@@ -1806,7 +2043,9 @@ export {
   CONTEXT_END,
   EXAMPLES_FIRST,
   HINT_LEVELS,
+  LADDER,
   LATE_SOURCES,
+  NEXT_ACTIONS,
   POLICY_FILE,
   REPORT_RULE,
   SMELL_DEFAULTS,
@@ -1825,6 +2064,7 @@ export {
   cyan,
   detectSmell,
   dim,
+  disciplineMetrics,
   draftRuleFromReview,
   effectiveRules,
   evaluate,
@@ -1836,12 +2076,15 @@ export {
   green,
   hintCard,
   inScope,
+  isTestPath,
   kataSuggestions,
   mask,
   matchGlob,
+  median,
   mergeManagedBlock,
   mergePolicies,
   navigatorQuestions,
+  nextPractice,
   normalizePath,
   parseBriefMarkdown,
   parseDeny,
@@ -1849,6 +2092,7 @@ export {
   parseUnifiedDiff,
   parseYaml,
   parseYamlSubset,
+  practice,
   reach,
   red,
   redact,
@@ -1866,9 +2110,12 @@ export {
   rulesWithoutCoaching,
   scalar,
   scopeCheck,
+  startingPractice,
   taskScope,
   testOrderFindings,
   toYaml,
   validatePolicy,
+  weeklyReport,
+  weeklyReportToMarkdown,
   yellow
 };

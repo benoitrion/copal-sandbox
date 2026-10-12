@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow, weeklyReport, weeklyReportToMarkdown, practice, PullRecord, DeploymentRecord, IncidentRecord } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges, branchCommits } from "./git";
 
@@ -18,6 +18,7 @@ Usage:
   copal reflect "TASK" --answers FILE|- [--json]          Non-interactive: answers JSON → agent brief (IDE plugins)
   copal review [--base REF] [--json]                      Review my change: engine + scope check on the working tree vs base, local only
   copal scope-check [--base REF] [--json]                 Compare the change with .copal/brief.md; ask about anything beyond it (never blocks)
+  copal weekly --repo OWNER/NAME [--out DIR] [--json]    Weekly team report: disciplines, delivery (DORA where data allows), next practice
   copal heartbeat FILE [--editor NAME]                    Record IDE activity (adoption)
   copal kata done URL|ID [--rule RULE_ID]                 Record a finished kata (adds it to the library if new)
   copal event RULE_ID LEVEL ACTION [--source ide]         Record a hint-ladder step (0-4; shown|ask|explain|show_me|skipped|answered)
@@ -499,6 +500,61 @@ exec "${process.execPath}" "${path.resolve(__filename)}" check --staged${env}
   return 2;
 }
 
+// ---------------------------------------------------------------- weekly report
+async function weeklyCmd(flags: Record<string, string | boolean>): Promise<number> {
+  const repo = (typeof flags.repo === "string" && flags.repo) || process.env.GITHUB_REPOSITORY;
+  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) return console.error("usage: copal weekly --repo OWNER/NAME [--out reports/] [--json]  (GITHUB_TOKEN for private repositories)"), 2;
+  const api = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const get = async (p: string) => {
+    const r = await fetch(api + p, { headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+    if (!r.ok) throw new Error(`GitHub ${r.status} on ${p}`);
+    return r.json() as Promise<any>;
+  };
+  const now = Date.now();
+  const since = now - 14 * 864e5;
+  const list: any[] = await get(`/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100`);
+  const merged = list.filter((p) => p.merged_at && Date.parse(p.merged_at) >= since);
+  const pulls: PullRecord[] = [];
+  for (const p of merged) {
+    const base = `/repos/${repo}/pulls/${p.number}`;
+    const [files, reviews, commits] = await Promise.all([get(`${base}/files?per_page=100`), get(`${base}/reviews?per_page=100`), get(`${base}/commits?per_page=100`)]);
+    pulls.push({
+      number: p.number, author: p.user?.login, createdAt: p.created_at, mergedAt: p.merged_at,
+      firstCommitAt: commits[0]?.commit?.author?.date,
+      files: files.map((f: any) => ({ filename: f.filename, additions: f.additions, deletions: f.deletions })),
+      reviews: reviews.map((r: any) => ({ author: r.user?.login, submittedAt: r.submitted_at })),
+      revert: /^revert\b/i.test(p.title ?? ""),
+    });
+  }
+  const weekAgo = now - 7 * 864e5;
+  let deployments: DeploymentRecord[] | undefined;
+  try {
+    const ds: any[] = await get(`/repos/${repo}/deployments?environment=${encodeURIComponent(String(flags.environment || "production"))}&per_page=100`);
+    deployments = [];
+    for (const d of ds.filter((x) => Date.parse(x.created_at) >= since)) {
+      const st: any[] = await get(`/repos/${repo}/deployments/${d.id}/statuses?per_page=1`);
+      deployments.push({ at: d.created_at, failed: ["failure", "error"].includes(st[0]?.state) });
+    }
+    if (!deployments.length) deployments = undefined;
+  } catch { deployments = undefined; }
+  let incidents: IncidentRecord[] | undefined;
+  try {
+    const is: any[] = await get(`/repos/${repo}/issues?labels=${encodeURIComponent(String(flags.incidentLabel || "incident"))}&state=all&since=${new Date(since).toISOString()}&per_page=100`);
+    incidents = is.length ? is.map((i) => ({ openedAt: i.created_at, resolvedAt: i.closed_at ?? undefined })) : undefined;
+  } catch { incidents = undefined; }
+  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), deployments, incidents, now });
+  if (flags.json) return console.log(JSON.stringify(report, null, 2)), 0;
+  const md = weeklyReportToMarkdown(report, (id) => { const p = practice(id); return p && `${p.title} (${p.minutes} min) — ${p.goal}`; });
+  if (typeof flags.out === "string") {
+    const file = path.join(flags.out, `weekly-${report.to.slice(0, 10)}.md`);
+    fs.mkdirSync(flags.out, { recursive: true });
+    fs.writeFileSync(file, md + "\n");
+    console.log(green(`✔ wrote ${file}`));
+  } else console.log(md);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const { cmd, flags } = parseArgs(process.argv.slice(2));
   if (flags.help || !cmd.length) {
@@ -530,6 +586,8 @@ async function main(): Promise<number> {
       return kataDone(cmd[2], flags);
     case "scope-check":
       return scopeCheckCmd(flags);
+    case "weekly":
+      return weeklyCmd(flags);
     case "review":
       return reviewCmd(flags);
     case "event": {
