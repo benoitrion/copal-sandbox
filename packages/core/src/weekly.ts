@@ -223,13 +223,14 @@ function fmt(v: number | null, metric: string): string {
 
 export function weeklyReportToMarkdown(r: WeeklyReport, practiceTitle?: (id: string) => string | undefined): string {
   const arrow = { better: "↗ better", worse: "↘ worse", stable: "→ stable" } as const;
-  const out = [`## Copal weekly report · ${r.from.slice(0, 10)} → ${r.to.slice(0, 10)}`, "", `${r.changes} changes merged. Team level only.`, ""];
-  out.push("| Discipline | Measure | This week | Trend | Status |", "|---|---|---|---|---|");
+  const out = [`## Copal team report · ${r.from.slice(0, 10)} → ${r.to.slice(0, 10)}`, "", `${r.changes} changes merged. Team level only.`, ""];
+  const weekly = Date.parse(r.to) - Date.parse(r.from) <= 7.5 * 864e5;
+  out.push(`| Discipline | Measure | ${weekly ? "This week" : "Value"} | Trend | Status |`, "|---|---|---|---|---|");
   for (const d of r.disciplines) out.push(`| ${d.name} | ${d.metric} | ${fmt(d.value, d.metric)} | ${d.trend ? arrow[d.trend] : "—"} | ${d.status} |`);
   out.push("");
   if (r.focus) {
     const t = practiceTitle?.(r.focus.practice);
-    out.push(`### This week: ${r.focus.name}`, "", r.focus.action, ...(t ? ["", `Practice: **${t}**`] : []), "");
+    out.push(`### ${weekly ? "This week" : "Start with"}: ${r.focus.name}`, "", r.focus.action, ...(t ? ["", `Practice: **${t}**`] : []), "");
   }
   if (r.rulesToTune.length) {
     out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");

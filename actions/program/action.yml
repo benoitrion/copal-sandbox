@@ -1,0 +1,38 @@
+name: Copal
+description: "Copal in your own CI: questions and a reviewer guide on each change, a weekly team report, and the readiness diagnostic. Your code stays in your runner."
+branding: { icon: check-circle, color: green }
+inputs:
+  mode:
+    description: "auto (pull request → check; schedule → weekly report), check, weekly or readiness"
+    default: auto
+  track:
+    description: "Your situation: new-products, legacy or agents. Picks which practices come first."
+    default: ""
+  days:
+    description: "Readiness only: how many days of history to read"
+    default: "90"
+  report-label:
+    description: "Label of the GitHub issue that holds each report"
+    default: copal-report
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with: { node-version: 20 }
+    - name: Build Copal
+      shell: bash
+      working-directory: ${{ github.action_path }}/../..
+      run: |
+        npm ci --no-audit --no-fund --loglevel=error
+        npm run build --silent
+    - name: Run
+      shell: bash
+      env:
+        COPAL: ${{ github.action_path }}/../..
+        MODE: ${{ inputs.mode }}
+        TRACK: ${{ inputs.track }}
+        DAYS: ${{ inputs.days }}
+        LABEL: ${{ inputs.report-label }}
+        GH_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
+      run: bash "$COPAL/actions/program/run.sh"

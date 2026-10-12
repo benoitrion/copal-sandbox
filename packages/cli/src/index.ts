@@ -512,8 +512,16 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
     return r.json() as Promise<any>;
   };
   const now = Date.now();
-  const since = now - 14 * 864e5;
-  const list: any[] = await get(`/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100`);
+  // --days N: one window of N days with no comparison (readiness run); default: this week vs last week.
+  const days = Math.max(1, Math.min(365, Number(flags.days) || 7));
+  const single = flags.days !== undefined;
+  const since = now - (single ? days : 14) * 864e5;
+  const list: any[] = [];
+  for (let page = 1; page <= (single ? 5 : 1); page++) {
+    const batch: any[] = await get(`/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`);
+    list.push(...batch);
+    if (batch.length < 100 || Date.parse(batch[batch.length - 1].updated_at) < since) break;
+  }
   const merged = list.filter((p) => p.merged_at && Date.parse(p.merged_at) >= since);
   const pulls: PullRecord[] = [];
   for (const p of merged) {
@@ -535,7 +543,7 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
       for (const c of cs) for (const m of String(c.body ?? "").matchAll(/^\/copal\s+(?:false-positive|fp)\s+([\w-]+)/gm)) dismissals.push({ ruleId: m[1], at: c.created_at });
     } catch { /* comments unavailable */ }
   }
-  const weekAgo = now - 7 * 864e5;
+  const weekAgo = single ? since : now - 7 * 864e5;
   let deployments: DeploymentRecord[] | undefined;
   try {
     const ds: any[] = await get(`/repos/${repo}/deployments?environment=${encodeURIComponent(String(flags.environment || "production"))}&per_page=100`);
@@ -551,11 +559,11 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
     const is: any[] = await get(`/repos/${repo}/issues?labels=${encodeURIComponent(String(flags.incidentLabel || "incident"))}&state=all&since=${new Date(since).toISOString()}&per_page=100`);
     incidents = is.length ? is.map((i) => ({ openedAt: i.created_at, resolvedAt: i.closed_at ?? undefined })) : undefined;
   } catch { incidents = undefined; }
-  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), deployments, incidents, dismissals, track: (["new-products", "legacy", "agents"] as const).find((t) => t === flags.track), now });
+  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: single ? undefined : pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), days: single ? days : 7, deployments, incidents, dismissals, track: (["new-products", "legacy", "agents"] as const).find((t) => t === flags.track), now });
   if (flags.json) return console.log(JSON.stringify(report, null, 2)), 0;
   const md = weeklyReportToMarkdown(report, (id) => { const p = practice(id); return p && `${p.title} (${p.where}, ${p.minutes} min) — ${p.goal}`; });
   if (typeof flags.out === "string") {
-    const file = path.join(flags.out, `weekly-${report.to.slice(0, 10)}.md`);
+    const file = path.join(flags.out, `${single ? "readiness" : "weekly"}-${report.to.slice(0, 10)}.md`);
     fs.mkdirSync(flags.out, { recursive: true });
     fs.writeFileSync(file, md + "\n");
     console.log(green(`✔ wrote ${file}`));

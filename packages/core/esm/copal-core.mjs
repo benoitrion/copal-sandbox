@@ -1683,6 +1683,11 @@ function reach(input) {
 }
 
 // src/ladder.ts
+var TRACKS = {
+  "new-products": { name: "New products", summary: "Build with AI from day one, without losing structure.", emphasis: ["examples", "steps", "scope"] },
+  legacy: { name: "Legacy code", summary: "Change existing systems safely: pin down behaviour first, then change in small steps.", emphasis: ["examples", "scope", "steps"] },
+  agents: { name: "AI agents", summary: "Keep agents inside a clear brief, one slice of the system, and reviewed steps.", emphasis: ["scope", "steps", "examples"] }
+};
 var PRACTICES = [
   {
     id: "examples-1",
@@ -1788,18 +1793,90 @@ var PRACTICES = [
     doneWhen: "A feature reached production as several merged steps."
   }
 ];
+var VARIANTS = [
+  {
+    id: "legacy-examples-2",
+    tracks: ["legacy"],
+    where: "your code",
+    discipline: "examples",
+    rung: 2,
+    minutes: 60,
+    title: "Pin down behaviour before any change",
+    goal: "Never let the AI change old code that no test describes.",
+    steps: ["Before your next change to old code, write tests for what it does today.", "Include the odd cases you find, even if they look wrong.", "Only then ask the AI for the change, and keep the tests."],
+    doneWhen: "A real change to old code lands with the tests that protected it."
+  },
+  {
+    id: "legacy-steps-2",
+    tracks: ["legacy"],
+    where: "your code",
+    discipline: "steps",
+    rung: 2,
+    minutes: 60,
+    title: "Refactor in tiny steps",
+    goal: "Change old code one safe move at a time.",
+    steps: ["With the tests green, make one small refactoring (rename, extract, move).", "Run the tests and commit.", "Ask the AI for one move at a time, never a rewrite."],
+    doneWhen: "A messy function was improved through several green commits.",
+    kata: { name: "Gilded Rose", url: "https://github.com/emilybache/GildedRose-Refactoring-Kata", credit: "Emily Bache" }
+  },
+  {
+    id: "agents-scope-2",
+    tracks: ["agents"],
+    where: "your code",
+    discipline: "scope",
+    rung: 2,
+    minutes: 30,
+    title: "Brief every agent task",
+    goal: "An agent gets a goal, a scope and a definition of done before it starts.",
+    steps: ["Write the brief: goal, in scope, out of scope, done when.", "Ask the agent for a plan and review it before any code.", "Run Copal's scope check on the result."],
+    doneWhen: "Three agent tasks in a row stayed inside their brief."
+  },
+  {
+    id: "agents-steps-2",
+    tracks: ["agents"],
+    where: "your code",
+    discipline: "steps",
+    rung: 2,
+    minutes: 45,
+    title: "Agents work in reviewed steps",
+    goal: "Stop the agent after each verified step instead of reviewing one big result.",
+    steps: ["Ask the agent to stop when one test passes.", "Read that diff and commit it.", "Only then let it continue with the next step."],
+    doneWhen: "An agent task landed as several small, reviewed commits."
+  },
+  {
+    id: "agents-examples-2",
+    tracks: ["agents"],
+    where: "your code",
+    discipline: "examples",
+    rung: 2,
+    minutes: 45,
+    title: "Tests are the agent's contract",
+    goal: "The agent implements your examples and may not change them.",
+    steps: ["Write the tests yourself first.", "Tell the agent it must not edit test files.", "Reject any change that touches them."],
+    doneWhen: "An agent change passed tests it did not write or modify."
+  }
+];
 var ORDER = ["examples", "scope", "steps"];
 var LADDER = [...PRACTICES].sort((a, b) => ORDER.indexOf(a.discipline) - ORDER.indexOf(b.discipline) || a.rung - b.rung);
 function practice(id) {
-  return LADDER.find((p) => p.id === id);
+  return LADDER.find((p) => p.id === id) ?? VARIANTS.find((p) => p.id === id);
 }
-function startingPractice(discipline, status) {
+function practiceAt(discipline, rung, track) {
+  return track && VARIANTS.find((p) => p.discipline === discipline && p.rung === rung && p.tracks.includes(track)) || LADDER.find((p) => p.discipline === discipline && p.rung === rung);
+}
+function ladderFor(track) {
+  return LADDER.map((p) => practiceAt(p.discipline, p.rung, track));
+}
+function startingPractice(discipline, status, track) {
   const rung = status === "strong" ? 3 : status === "fair" ? 2 : 1;
-  return LADDER.find((p) => p.discipline === discipline && p.rung === rung);
+  return practiceAt(discipline, rung, track);
 }
-function nextPractice(id) {
+function nextPractice(id, track) {
   const p = practice(id);
-  return p && LADDER.find((q) => q.discipline === p.discipline && q.rung === p.rung + 1);
+  return p && p.rung < 3 ? practiceAt(p.discipline, p.rung + 1, track ?? p.tracks?.[0]) : void 0;
+}
+function trackRank(track, discipline) {
+  return track ? TRACKS[track].emphasis.indexOf(discipline) : 0;
 }
 
 // src/weekly.ts
@@ -1912,8 +1989,8 @@ function weeklyReport(input) {
   const unplanned = (d) => d.unplanned ?? incidents.some((i) => Date.parse(d.at) >= Date.parse(i.openedAt) && (!i.resolvedAt || Date.parse(d.at) <= Date.parse(i.resolvedAt)));
   delivery.push(deploys.length && (input.incidents || deploys.some((d) => d.unplanned !== void 0)) ? { name: "Deployment rework rate", value: deploys.filter(unplanned).length / deploys.length, unit: "share of deployments" } : { name: "Deployment rework rate", value: null, unit: "share of deployments", note: "Not measured: needs deployments and labelled incidents" });
   const rank = { "needs practice": 0, fair: 1, strong: 2, unknown: 3 };
-  const pick = [...disciplines].sort((a, b) => rank[a.status] - rank[b.status] || Number(b.trend === "worse") - Number(a.trend === "worse"))[0];
-  const focus = pick && pick.status !== "strong" && pick.status !== "unknown" ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status).id } : null;
+  const pick = [...disciplines].sort((a, b) => rank[a.status] - rank[b.status] || Number(b.trend === "worse") - Number(a.trend === "worse") || (a.id === "review" || b.id === "review" ? 0 : trackRank(input.track, a.id) - trackRank(input.track, b.id)))[0];
+  const focus = pick && pick.status !== "strong" && pick.status !== "unknown" ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status, input.track).id } : null;
   const counts = /* @__PURE__ */ new Map();
   for (const d of input.dismissals ?? []) if (inWindow(d.at)) counts.set(d.ruleId, (counts.get(d.ruleId) ?? 0) + 1);
   const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed }));
@@ -1926,13 +2003,14 @@ function fmt(v, metric) {
 }
 function weeklyReportToMarkdown(r, practiceTitle) {
   const arrow = { better: "\u2197 better", worse: "\u2198 worse", stable: "\u2192 stable" };
-  const out = [`## Copal weekly report \xB7 ${r.from.slice(0, 10)} \u2192 ${r.to.slice(0, 10)}`, "", `${r.changes} changes merged. Team level only.`, ""];
-  out.push("| Discipline | Measure | This week | Trend | Status |", "|---|---|---|---|---|");
+  const out = [`## Copal team report \xB7 ${r.from.slice(0, 10)} \u2192 ${r.to.slice(0, 10)}`, "", `${r.changes} changes merged. Team level only.`, ""];
+  const weekly = Date.parse(r.to) - Date.parse(r.from) <= 7.5 * 864e5;
+  out.push(`| Discipline | Measure | ${weekly ? "This week" : "Value"} | Trend | Status |`, "|---|---|---|---|---|");
   for (const d of r.disciplines) out.push(`| ${d.name} | ${d.metric} | ${fmt(d.value, d.metric)} | ${d.trend ? arrow[d.trend] : "\u2014"} | ${d.status} |`);
   out.push("");
   if (r.focus) {
     const t = practiceTitle?.(r.focus.practice);
-    out.push(`### This week: ${r.focus.name}`, "", r.focus.action, ...t ? ["", `Practice: **${t}**`] : [], "");
+    out.push(`### ${weekly ? "This week" : "Start with"}: ${r.focus.name}`, "", r.focus.action, ...t ? ["", `Practice: **${t}**`] : [], "");
   }
   if (r.rulesToTune.length) {
     out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");
@@ -2119,6 +2197,7 @@ export {
   REPORT_RULE,
   SMELL_DEFAULTS,
   SUPPORTED_VERSIONS,
+  TRACKS,
   YamlError,
   agentContextBlock,
   applicableRules,
@@ -2147,6 +2226,7 @@ export {
   inScope,
   isTestPath,
   kataSuggestions,
+  ladderFor,
   mask,
   matchGlob,
   median,
@@ -2162,6 +2242,7 @@ export {
   parseYaml,
   parseYamlSubset,
   practice,
+  practiceAt,
   reach,
   red,
   redact,
@@ -2185,6 +2266,7 @@ export {
   taskScope,
   testOrderFindings,
   toYaml,
+  trackRank,
   validatePolicy,
   weeklyReport,
   weeklyReportToMarkdown,
