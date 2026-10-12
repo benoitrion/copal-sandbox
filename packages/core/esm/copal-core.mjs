@@ -909,6 +909,7 @@ function normalize(raw, origin) {
     project: o.project,
     mode: o.mode,
     navigator: o.navigator ?? void 0,
+    risk: toArr(o.risk),
     extends: ext === void 0 || ext === null ? [] : Array.isArray(ext) ? ext : [String(ext)],
     rules: (o.rules ?? []).map((r) => normalizeRule({ ...r, paths: toArr(r.paths), exclude: toArr(r.exclude), sources: toArr(r.sources) })),
     redact: o.redact ?? [],
@@ -943,6 +944,7 @@ function mergePolicies(parent, child) {
     project: child.project ?? parent.project,
     mode: child.mode ?? parent.mode,
     navigator: child.navigator ?? parent.navigator,
+    risk: [.../* @__PURE__ */ new Set([...parent.risk ?? [], ...child.risk ?? []])],
     rules: [...byId.values()],
     redact: [...parent.redact ?? [], ...child.redact ?? []],
     environments: envs
@@ -1681,9 +1683,10 @@ function reach(input) {
 }
 
 // src/ladder.ts
-var LADDER = [
+var PRACTICES = [
   {
     id: "examples-1",
+    where: "learning hour",
     discipline: "examples",
     rung: 1,
     minutes: 45,
@@ -1695,17 +1698,18 @@ var LADDER = [
   },
   {
     id: "examples-2",
+    where: "your code",
     discipline: "examples",
     rung: 2,
     minutes: 60,
     title: "Tests first, AI implements",
     goal: "Use examples as the AI's specification.",
-    steps: ["Write the examples for one business rule as tests.", "Ask your AI assistant to make them pass, and nothing else.", "Reject any code no test asked for.", "Compare the result with a prompt-only attempt."],
-    doneWhen: "The AI's change passes your tests and adds no untested behaviour.",
-    kata: { name: "Supermarket Receipt", url: "https://github.com/emilybache/SupermarketReceipt-Refactoring-Kata", credit: "Emily Bache" }
+    steps: ["Take your next real task.", "Write the examples for its business rule as tests.", "Ask your AI assistant to make them pass, and nothing else.", "Reject any code no test asked for."],
+    doneWhen: "A real change lands where the AI's code passes your tests and adds no untested behaviour."
   },
   {
     id: "examples-3",
+    where: "your code",
     discipline: "examples",
     rung: 3,
     minutes: 90,
@@ -1716,9 +1720,10 @@ var LADDER = [
     kata: { name: "Gilded Rose", url: "https://github.com/emilybache/GildedRose-Refactoring-Kata", credit: "Emily Bache" }
   },
   {
-    id: "scope-1",
+    id: "scope-2",
+    where: "your code",
     discipline: "scope",
-    rung: 1,
+    rung: 2,
     minutes: 30,
     title: "One-line brief",
     goal: "Agree the scope before the first prompt.",
@@ -1726,18 +1731,20 @@ var LADDER = [
     doneWhen: "Three changes in a row with no out-of-scope question."
   },
   {
-    id: "scope-2",
+    id: "scope-1",
+    where: "learning hour",
     discipline: "scope",
-    rung: 2,
+    rung: 1,
     minutes: 60,
     title: "Give the AI only one slice",
-    goal: "Limit the context to the module the change belongs to.",
-    steps: ["Find the boundary of the module you are changing.", "Give the AI only that module and its tests.", "If it needs another module, stop and decide whether that is a separate change."],
-    doneWhen: "The change touches one module and its tests.",
+    goal: "Limit the context to the part of the code the change belongs to.",
+    steps: ["Pick one change in the kata.", "Give the AI only the code that change belongs to, and its tests.", "If it asks for more, stop and discuss whether that is a separate change."],
+    doneWhen: "The change touches one part of the code and its tests.",
     kata: { name: "Theatrical Players", url: "https://github.com/emilybache/Theatrical-Players-Refactoring-Kata", credit: "Emily Bache" }
   },
   {
     id: "scope-3",
+    where: "your code",
     discipline: "scope",
     rung: 3,
     minutes: 90,
@@ -1747,9 +1754,10 @@ var LADDER = [
     doneWhen: "The rule runs on every change and the team agrees with its question."
   },
   {
-    id: "steps-1",
+    id: "steps-2",
+    where: "your code",
     discipline: "steps",
-    rung: 1,
+    rung: 2,
     minutes: 45,
     title: "Split a change in three",
     goal: "See that a feature can land as several small, safe changes.",
@@ -1757,9 +1765,10 @@ var LADDER = [
     doneWhen: "Each part is under 400 lines and was reviewed on its own."
   },
   {
-    id: "steps-2",
+    id: "steps-1",
+    where: "learning hour",
     discipline: "steps",
-    rung: 2,
+    rung: 1,
     minutes: 60,
     title: "Commit on every green",
     goal: "Work in steps small enough to undo without thinking.",
@@ -1769,6 +1778,7 @@ var LADDER = [
   },
   {
     id: "steps-3",
+    where: "your code",
     discipline: "steps",
     rung: 3,
     minutes: 90,
@@ -1778,6 +1788,8 @@ var LADDER = [
     doneWhen: "A feature reached production as several merged steps."
   }
 ];
+var ORDER = ["examples", "scope", "steps"];
+var LADDER = [...PRACTICES].sort((a, b) => ORDER.indexOf(a.discipline) - ORDER.indexOf(b.discipline) || a.rung - b.rung);
 function practice(id) {
   return LADDER.find((p) => p.id === id);
 }
@@ -1902,7 +1914,10 @@ function weeklyReport(input) {
   const rank = { "needs practice": 0, fair: 1, strong: 2, unknown: 3 };
   const pick = [...disciplines].sort((a, b) => rank[a.status] - rank[b.status] || Number(b.trend === "worse") - Number(a.trend === "worse"))[0];
   const focus = pick && pick.status !== "strong" && pick.status !== "unknown" ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status).id } : null;
-  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus };
+  const counts = /* @__PURE__ */ new Map();
+  for (const d of input.dismissals ?? []) if (inWindow(d.at)) counts.set(d.ruleId, (counts.get(d.ruleId) ?? 0) + 1);
+  const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed }));
+  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune };
 }
 function fmt(v, metric) {
   if (v == null) return "\u2014";
@@ -1919,9 +1934,55 @@ function weeklyReportToMarkdown(r, practiceTitle) {
     const t = practiceTitle?.(r.focus.practice);
     out.push(`### This week: ${r.focus.name}`, "", r.focus.action, ...t ? ["", `Practice: **${t}**`] : [], "");
   }
+  if (r.rulesToTune.length) {
+    out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");
+    for (const t of r.rulesToTune) out.push(`- \`${t.ruleId}\`: dismissed ${t.dismissed} times`);
+    out.push("");
+  }
   out.push("### Delivery", "", "| Metric | Value | Note |", "|---|---|---|");
   for (const d of r.delivery) out.push(`| ${d.name} | ${d.value == null ? "\u2014" : d.unit.startsWith("share") ? `${Math.round(d.value * 100)}%` : `${Math.round(d.value * 100) / 100} ${d.unit}`} | ${d.note ?? ""} |`);
   out.push("", "_Delivery metrics follow DORA's five software delivery metrics where the data allows: trends to discuss, not targets._");
+  return out.join("\n");
+}
+
+// src/reviewguide.ts
+var LOW = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock|go\.sum|Gemfile\.lock)$|\.(md|mdx|rst|txt|snap|svg|png|jpe?g|gif)$|(^|\/)(dist|build|vendor|generated)\//i;
+function reviewerGuide(input) {
+  const large = input.largeFile ?? 200;
+  const riskGlobs = input.policy?.risk ?? [];
+  const guide = { tests: [], briefUsed: !!input.briefUsed, risky: [], rest: [], lowRisk: [] };
+  for (const f of input.files.filter((x) => x.status !== "deleted")) {
+    const p = normalizePath(f.path);
+    if (isTestPath(p)) {
+      guide.tests.push(p);
+      continue;
+    }
+    if (LOW.test(p)) {
+      guide.lowRisk.push(p);
+      continue;
+    }
+    const reasons = [];
+    const glob = riskGlobs.find((g) => matchGlob(p, g));
+    if (glob) reasons.push(`risk path (${glob})`);
+    const rules = [...new Set((input.findings ?? []).filter((x) => normalizePath(x.file) === p).map((x) => x.ruleId))];
+    if (rules.length) reasons.push(`team rule: ${rules.join(", ")}`);
+    if (input.outOfScope?.some((o) => normalizePath(o) === p)) reasons.push("outside the brief");
+    if (f.addedLines.length > large) reasons.push(`${f.addedLines.length} lines added`);
+    if (reasons.length) guide.risky.push({ path: p, reasons });
+    else guide.rest.push(p);
+  }
+  return guide;
+}
+function reviewerGuideToMarkdown(g) {
+  const out = ["### Reviewer guide", ""];
+  const first = [];
+  if (g.briefUsed) first.push("the task brief (`.copal/brief.md`): is this the right change?");
+  first.push(g.tests.length ? `the tests (${g.tests.map((t) => `\`${t}\``).join(", ")}): do they state the business rule?` : "**no test changed**: ask which example proves this change is right");
+  out.push("**1. Read first:** " + first.join("; "));
+  out.push(g.risky.length ? "**2. Then the risky files:**" : "**2. Risky files:** none flagged");
+  for (const r of g.risky) out.push(`- \`${r.path}\`: ${r.reasons.join(", ")}`);
+  if (g.rest.length) out.push(`**3. The rest** (${g.rest.length} file${g.rest.length > 1 ? "s" : ""}): a quick read is usually enough when the tests above are convincing.`);
+  if (g.lowRisk.length) out.push(`_Low risk, skim or skip: ${g.lowRisk.length} file${g.lowRisk.length > 1 ? "s" : ""} (docs, lockfiles, generated)._`);
   return out.join("\n");
 }
 
@@ -2112,6 +2173,8 @@ export {
   resolvePolicy,
   reviewActions,
   reviewChange,
+  reviewerGuide,
+  reviewerGuideToMarkdown,
   ruleHealth,
   ruleSummary,
   rulesToGuidance,

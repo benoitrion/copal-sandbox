@@ -102,6 +102,8 @@ export interface Policy {
     /** v4: navigator mode configuration. */
     navigator?: NavigatorConfig;
     extends?: string[];
+    /** Globs for paths that always deserve a careful review (auth, billing, migrations…). Used by the reviewer guide. */
+    risk?: string[];
     rules: Rule[];
     redact?: RedactPattern[];
     environments?: Record<string, EnvironmentOverride>;

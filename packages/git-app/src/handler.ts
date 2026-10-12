@@ -1,6 +1,6 @@
 import * as crypto from "node:crypto";
 import { CopalClient } from "@copal/client";
-import { parsePolicy, reportToMarkdown, resolvePolicy, scopeCheck, testOrderFindings } from "@copal/core";
+import { parsePolicy, reportToMarkdown, resolvePolicy, reviewerGuide, reviewerGuideToMarkdown, scopeCheck, testOrderFindings } from "@copal/core";
 import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider, ChangeSet } from "./providers";
 import { COMMAND_RX, runCommand } from "./commands";
 
@@ -72,7 +72,17 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       : result.findings.length
         ? `Passed with ${result.summary.audit} audit finding(s)`
         : "Passed — no findings";
-    const scope = scopeMarkdown(cs);
+    let scope = scopeMarkdown(cs);
+    try {
+      // Reviewer guide: where to look first (tests, brief, risky files), so review effort goes where it matters.
+      const policy = resolvePolicy(parsePolicy(cs.policyText));
+      const outOfScope = cs.briefText ? scopeCheck(cs.briefText, cs.files).map((i) => i.file) : undefined;
+      const g = reviewerGuide({ files: cs.files, findings: result.findings, policy, outOfScope, briefUsed: !!cs.briefText });
+      // Only when there is something to steer: a clean, in-scope change gets no extra comment.
+      if (scope || result.findings.length || g.risky.length) scope = (scope ? `${scope}\n\n` : "") + reviewerGuideToMarkdown(g);
+    } catch (e) {
+      log(`${provider.label}: reviewer guide unavailable (${(e as Error).message})`);
+    }
     if (result.findings.length) {
       // GitHub/GitLab reject the whole review if an inline comment targets a line outside the diff:
       // inline only findings on added lines; every finding is still listed in the review summary.

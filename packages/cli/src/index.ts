@@ -527,6 +527,14 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
       revert: /^revert\b/i.test(p.title ?? ""),
     });
   }
+  // Dismissed hints (`/copal false-positive RULE` replies on the change) → rules to tune.
+  const dismissals: { ruleId: string; at: string }[] = [];
+  for (const p of merged) {
+    try {
+      const cs: any[] = await get(`/repos/${repo}/issues/${p.number}/comments?per_page=100`);
+      for (const c of cs) for (const m of String(c.body ?? "").matchAll(/^\/copal\s+(?:false-positive|fp)\s+([\w-]+)/gm)) dismissals.push({ ruleId: m[1], at: c.created_at });
+    } catch { /* comments unavailable */ }
+  }
   const weekAgo = now - 7 * 864e5;
   let deployments: DeploymentRecord[] | undefined;
   try {
@@ -543,9 +551,9 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
     const is: any[] = await get(`/repos/${repo}/issues?labels=${encodeURIComponent(String(flags.incidentLabel || "incident"))}&state=all&since=${new Date(since).toISOString()}&per_page=100`);
     incidents = is.length ? is.map((i) => ({ openedAt: i.created_at, resolvedAt: i.closed_at ?? undefined })) : undefined;
   } catch { incidents = undefined; }
-  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), deployments, incidents, now });
+  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), deployments, incidents, dismissals, now });
   if (flags.json) return console.log(JSON.stringify(report, null, 2)), 0;
-  const md = weeklyReportToMarkdown(report, (id) => { const p = practice(id); return p && `${p.title} (${p.minutes} min) — ${p.goal}`; });
+  const md = weeklyReportToMarkdown(report, (id) => { const p = practice(id); return p && `${p.title} (${p.where}, ${p.minutes} min) — ${p.goal}`; });
   if (typeof flags.out === "string") {
     const file = path.join(flags.out, `weekly-${report.to.slice(0, 10)}.md`);
     fs.mkdirSync(flags.out, { recursive: true });

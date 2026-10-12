@@ -45,6 +45,12 @@ test("weekly: delivery metrics only when data allows", () => {
   assert.equal(recovered.delivery[4].value, null);
 });
 
+test("weekly: rules developers keep dismissing are listed to tune", () => {
+  const r = weeklyReport({ pulls: [pr(1, 100, true, 2)], dismissals: [{ ruleId: "no-any", at: at(5) }, { ruleId: "no-any", at: at(3) }, { ruleId: "todo-left", at: at(2) }], now });
+  assert.deepEqual(r.rulesToTune, [{ ruleId: "no-any", dismissed: 2 }]);
+  assert.match(weeklyReportToMarkdown(r), /Rules to tune[\s\S]*no-any/);
+});
+
 test("ladder: three rungs per discipline, start and next", () => {
   for (const d of ["examples", "scope", "steps"] as const) assert.deepEqual(LADDER.filter((p) => p.discipline === d).map((p) => p.rung), [1, 2, 3]);
   assert.equal(startingPractice("examples", "needs practice").id, "examples-1");

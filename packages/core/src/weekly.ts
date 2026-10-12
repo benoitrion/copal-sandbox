@@ -63,6 +63,8 @@ export interface WeeklyReport {
   delivery: DeliveryMetric[];
   /** The discipline to work on next, with what to do this week. */
   focus: { discipline: DisciplineId; name: string; action: string; practice: string } | null;
+  /** Team rules dismissed as false positives this week: tune or remove them, or developers stop reading hints. */
+  rulesToTune: { ruleId: string; dismissed: number }[];
 }
 
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|testing)\/|[._-](test|spec)s?\.[a-z0-9]+$|Tests?\.(java|kt|cs|scala|swift)$|_test\.(go|py|rb|exs?)$|(^|\/)test_[^/]+\.py$/i;
@@ -137,6 +139,8 @@ export function weeklyReport(input: {
   previous?: PullRecord[];
   deployments?: DeploymentRecord[];
   incidents?: IncidentRecord[];
+  /** Hints dismissed as false positives (`/copal false-positive RULE`, `copal-ignore`). */
+  dismissals?: { ruleId: string; at: string }[];
   now?: number;
   days?: number;
 }): WeeklyReport {
@@ -202,7 +206,11 @@ export function weeklyReport(input: {
     ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status).id }
     : null;
 
-  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus };
+  const counts = new Map<string, number>();
+  for (const d of input.dismissals ?? []) if (inWindow(d.at)) counts.set(d.ruleId, (counts.get(d.ruleId) ?? 0) + 1);
+  const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed }));
+
+  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune };
 }
 
 function fmt(v: number | null, metric: string): string {
@@ -220,6 +228,11 @@ export function weeklyReportToMarkdown(r: WeeklyReport, practiceTitle?: (id: str
   if (r.focus) {
     const t = practiceTitle?.(r.focus.practice);
     out.push(`### This week: ${r.focus.name}`, "", r.focus.action, ...(t ? ["", `Practice: **${t}**`] : []), "");
+  }
+  if (r.rulesToTune.length) {
+    out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");
+    for (const t of r.rulesToTune) out.push(`- \`${t.ruleId}\`: dismissed ${t.dismissed} times`);
+    out.push("");
   }
   out.push("### Delivery", "", "| Metric | Value | Note |", "|---|---|---|");
   for (const d of r.delivery) out.push(`| ${d.name} | ${d.value == null ? "—" : d.unit.startsWith("share") ? `${Math.round(d.value * 100)}%` : `${Math.round(d.value * 100) / 100} ${d.unit}`} | ${d.note ?? ""} |`);
