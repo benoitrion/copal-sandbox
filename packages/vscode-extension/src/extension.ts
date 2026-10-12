@@ -181,7 +181,8 @@ export function hintCardMarkdown(f: Finding, uri: string, policy?: Policy): stri
   ].filter(Boolean);
   out.push("", links.join(" · "));
   if (c.kata) out.push("", `$(mortar-board) Practice: [kata](${c.kata})`);
-  out.push("", `*Copal · ${f.ruleId}*`);
+  const risk = f.blocking ? "Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
+  out.push("", `*${[risk, f.kind, `Copal · ${f.ruleId}`].filter(Boolean).join(" · ")}*`);
   return out.join("\n");
 }
 

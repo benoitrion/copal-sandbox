@@ -237,6 +237,32 @@ export const BUILTIN_PACKS: Record<string, Policy> = {
         why: "The same text in several places drifts apart the day one copy changes.",
         coach: { question: "What does this value mean in the domain, and where should it live once?", reference: "https://refactoring.guru/replace-magic-number-with-symbolic-constant" },
       },
+      {
+        id: "complexity",
+        category: "quality",
+        mode: "audit",
+        severity: "warning",
+        smell: { kind: "complexity", max: 10 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/test/**"],
+        why: "Every decision path is a case to test and a place for a bug; past ten, nobody tests them all.",
+        coach: {
+          question: "Which decision is this code really making — could a lookup table or a small helper per case say it more simply?",
+          reference: "https://refactoring.guru/replace-conditional-with-polymorphism",
+          kata: `${SAMMAN}/gilded_rose.html`,
+        },
+      },
+      {
+        id: "duplicate-block",
+        category: "quality",
+        mode: "audit",
+        severity: "warning",
+        smell: { kind: "duplicate-block", max: 3 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/generated/**"],
+        why: "Copy-pasted code, common in generated code: the next fix must be made in every copy, and one is always missed.",
+        coach: { question: "What differs between these copies — could it be a parameter of one function?", reference: "https://refactoring.guru/smells/duplicate-code" },
+      },
     ],
   },
   "clean-code": {
@@ -291,7 +317,7 @@ export interface ValidationIssue {
 }
 
 const KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell", "changeSize"] as const;
-const SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal"];
+const SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal", "complexity", "duplicate-block"];
 
 export function validatePolicy(p: Policy): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -310,6 +336,8 @@ export function validatePolicy(p: Policy): ValidationIssue[] {
     seen.add(r.id);
     const kinds = KINDS.filter((k) => r[k] !== undefined && r[k] !== false);
     if (kinds.length !== 1) issues.push({ ruleId: r.id, message: `expected exactly one of ${KINDS.join(", ")}; got ${kinds.join(", ") || "none"}` });
+    if (r.risk && !["high", "medium", "low"].includes(r.risk)) issues.push({ ruleId: r.id, message: `invalid risk "${r.risk}" (high | medium | low)` });
+    if (r.kind && !["Security", "Error prone", "Complexity", "Duplication", "Tests", "Architecture", "Dependencies", "Best practice"].includes(r.kind)) issues.push({ ruleId: r.id, message: `invalid kind "${r.kind}"` });
     if (r.mode && !["audit", "enforce", "off"].includes(r.mode)) issues.push({ ruleId: r.id, message: `invalid mode "${r.mode}"` });
     if (r.deny && !/\s->\s/.test(r.deny)) issues.push({ ruleId: r.id, message: 'deny must look like "from/** -> to/**"' });
     if (r.smell && !SMELL_KINDS.includes(r.smell.kind)) issues.push({ ruleId: r.id, message: `unknown smell "${r.smell.kind}" (${SMELL_KINDS.join(", ")})` });

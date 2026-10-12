@@ -2,7 +2,7 @@ import * as posix from "./posix";
 import { inScope, matchGlob, normalizePath } from "./glob";
 import { BUILTIN_REDACT, effectiveRules } from "./policy";
 import { detectSmell } from "./smells";
-import type { Category, FileChange, Finding, Policy, Report, Rule, Severity } from "./types";
+import type { Category, FileChange, Finding, IssueKind, Policy, Report, Risk, Rule, Severity } from "./types";
 
 export interface EvaluateOptions {
   environment?: string;
@@ -77,8 +77,25 @@ function base(rule: Rule, file: string, line: number, message: string, cat: Cate
     why: rule.why,
     sources: rule.sources,
     ...(rule.coach ? { coach: rule.coach } : {}),
+    ...classify(rule, rule.category ?? cat, rule.severity ?? sev, mode === "enforce"),
     ...(typeof rule.fix === "string" ? { fixText: rule.fix } : {}),
   };
+}
+
+/** Risk and family of a rule's findings: what a lead sees first, in every surface. Rules can override both. */
+export function classify(rule: Rule, category: Category | string, severity: Severity | string, blocking: boolean): { risk: Risk; kind: IssueKind } {
+  const smell = rule.smell?.kind;
+  let kind: IssueKind, risk: Risk;
+  if (category === "security") [kind, risk] = ["Security", "high"];
+  else if (category === "architecture") [kind, risk] = ["Architecture", "medium"];
+  else if (category === "dependency") [kind, risk] = ["Dependencies", "medium"];
+  else if (rule.id === "focused-test") [kind, risk] = ["Error prone", "high"];
+  else if (category === "testing") [kind, risk] = ["Tests", rule.id === "skipped-test" ? "low" : "medium"];
+  else if (smell === "duplicate-block" || smell === "duplicated-literal") [kind, risk] = ["Duplication", smell === "duplicate-block" ? "medium" : "low"];
+  else if (smell || rule.changeSize) [kind, risk] = ["Complexity", smell === "complexity" ? "medium" : "low"];
+  else [kind, risk] = ["Best practice", severity === "error" ? "medium" : "low"];
+  if (blocking || severity === "error") risk = "high";
+  return { risk: rule.risk ?? risk, kind: rule.kind ?? kind };
 }
 
 /** `// copal-ignore rule-id` on the same or previous line suppresses a finding (recorded as a false positive). */
@@ -217,7 +234,7 @@ function checkSmell(rule: Rule, file: FileChange): Finding[] {
   const whole = file.status === "added" || added.size >= file.content.split(/\r?\n/).length;
   return detectSmell(rule.smell!.kind, file.content, rule.smell!.max)
     .filter((h) => whole || added.has(h.line))
-    .map((h) => base(rule, file.path, h.line, h.message, "quality", "info"));
+    .map((h) => ({ ...base(rule, file.path, h.line, h.message, "quality", "info"), ...(h.advice ? { fixText: h.advice } : {}) }));
 }
 
 // ---------------------------------------------------------------- tests

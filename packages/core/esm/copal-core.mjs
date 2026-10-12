@@ -821,6 +821,32 @@ var BUILTIN_PACKS = {
         exclude: ["**/*.test.*", "**/*.spec.*"],
         why: "The same text in several places drifts apart the day one copy changes.",
         coach: { question: "What does this value mean in the domain, and where should it live once?", reference: "https://refactoring.guru/replace-magic-number-with-symbolic-constant" }
+      },
+      {
+        id: "complexity",
+        category: "quality",
+        mode: "audit",
+        severity: "warning",
+        smell: { kind: "complexity", max: 10 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/test/**"],
+        why: "Every decision path is a case to test and a place for a bug; past ten, nobody tests them all.",
+        coach: {
+          question: "Which decision is this code really making \u2014 could a lookup table or a small helper per case say it more simply?",
+          reference: "https://refactoring.guru/replace-conditional-with-polymorphism",
+          kata: `${SAMMAN}/gilded_rose.html`
+        }
+      },
+      {
+        id: "duplicate-block",
+        category: "quality",
+        mode: "audit",
+        severity: "warning",
+        smell: { kind: "duplicate-block", max: 3 },
+        paths: ["**/*.{ts,tsx,js,jsx,java,kt,cs,go,py}"],
+        exclude: ["**/*.test.*", "**/*.spec.*", "**/generated/**"],
+        why: "Copy-pasted code, common in generated code: the next fix must be made in every copy, and one is always missed.",
+        coach: { question: "What differs between these copies \u2014 could it be a parameter of one function?", reference: "https://refactoring.guru/smells/duplicate-code" }
       }
     ]
   },
@@ -869,7 +895,7 @@ var BUILTIN_REDACT = [
   }
 ];
 var KINDS = ["deny", "pattern", "secrets", "dependencies", "requireTest", "smell", "changeSize"];
-var SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal"];
+var SMELL_KINDS = ["long-function", "deep-nesting", "too-many-params", "large-file", "duplicated-literal", "complexity", "duplicate-block"];
 function validatePolicy(p) {
   const issues = [];
   if (!SUPPORTED_VERSIONS.includes(p.version)) issues.push({ message: `unsupported version ${p.version} (expected ${SUPPORTED_VERSIONS.join(" or ")})` });
@@ -887,6 +913,8 @@ function validatePolicy(p) {
     seen.add(r.id);
     const kinds = KINDS.filter((k) => r[k] !== void 0 && r[k] !== false);
     if (kinds.length !== 1) issues.push({ ruleId: r.id, message: `expected exactly one of ${KINDS.join(", ")}; got ${kinds.join(", ") || "none"}` });
+    if (r.risk && !["high", "medium", "low"].includes(r.risk)) issues.push({ ruleId: r.id, message: `invalid risk "${r.risk}" (high | medium | low)` });
+    if (r.kind && !["Security", "Error prone", "Complexity", "Duplication", "Tests", "Architecture", "Dependencies", "Best practice"].includes(r.kind)) issues.push({ ruleId: r.id, message: `invalid kind "${r.kind}"` });
     if (r.mode && !["audit", "enforce", "off"].includes(r.mode)) issues.push({ ruleId: r.id, message: `invalid mode "${r.mode}"` });
     if (r.deny && !/\s->\s/.test(r.deny)) issues.push({ ruleId: r.id, message: 'deny must look like "from/** -> to/**"' });
     if (r.smell && !SMELL_KINDS.includes(r.smell.kind)) issues.push({ ruleId: r.id, message: `unknown smell "${r.smell.kind}" (${SMELL_KINDS.join(", ")})` });
@@ -1077,8 +1105,77 @@ var SMELL_DEFAULTS = {
   "deep-nesting": 3,
   "too-many-params": 4,
   "large-file": 400,
-  "duplicated-literal": 3
+  "duplicated-literal": 3,
+  complexity: 10,
+  "duplicate-block": 3
 };
+var KEYWORDS = new Set("if else for while do switch case break continue return function const let var new typeof instanceof in of true false null undefined this async await try catch finally throw class extends import export default from yield void delete def elif and or not is None True False self pass lambda with as public private protected static final".split(" "));
+function functionSpans(lines, isPython) {
+  const out = [];
+  if (isPython) {
+    lines.forEach((l, i) => {
+      const m = /^(\s*)(?:async\s+)?def\s+(\w+)/.exec(l);
+      if (!m) return;
+      let end = i;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (!lines[j].trim()) continue;
+        if (lines[j].length - lines[j].trimStart().length <= m[1].length) break;
+        end = j;
+      }
+      out.push({ start: i, open: i, end, name: m[2] });
+    });
+    return out;
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (!FN_START.some((rx) => rx.test(lines[i]))) continue;
+    let open = -1;
+    for (let j = i; j < Math.min(lines.length, i + 3); j++) if (lines[j].includes("{")) {
+      open = j;
+      break;
+    }
+    if (open < 0) continue;
+    let depth = 0, end = -1;
+    for (let j = open; j < lines.length && end < 0; j++) {
+      for (const ch of lines[j]) {
+        if (ch === "{") depth++;
+        else if (ch === "}" && --depth === 0) {
+          end = j;
+          break;
+        }
+      }
+    }
+    if (end < 0) continue;
+    const name = /([\w$]+)\s*(?:=\s*(?:async\s*)?)?\(/.exec(lines[i])?.[1] ?? "function";
+    out.push({ start: i, open, end, name });
+  }
+  return out;
+}
+function longFunctionAdvice(body, name) {
+  const heads = /* @__PURE__ */ new Map();
+  for (const l of body) {
+    const m = /^\s*(?:await\s+)?([\w$]+(?:\.[\w$]+)*)\s*\(/.exec(l);
+    if (m && !KEYWORDS.has(m[1])) heads.set(m[1], (heads.get(m[1]) ?? 0) + 1);
+  }
+  const top = [...heads].sort((a, b) => b[1] - a[1])[0];
+  if (top && top[1] >= 5) return `${name} calls ${top[0]}(\u2026) ${top[1]} times: group those calls into smaller functions (one per area), or drive them from a table.`;
+  const blocks = body.join("\n").split(/\n\s*\n/).filter((b) => b.trim()).length;
+  if (blocks >= 3) return `${name} has ${blocks} blocks separated by blank lines: give each block a name and extract it as its own function.`;
+  return `Extract the steps of ${name} into well-named functions, and keep ${name} as their readable summary.`;
+}
+function complexityOf(body) {
+  let score = 1;
+  const vars = /* @__PURE__ */ new Map();
+  for (const l of body) {
+    const decisions = (l.match(/\b(if|elif|for|while|case|catch|except)\b|&&|\|\||\?(?![.?:])/g) ?? []).length;
+    score += decisions;
+    const m = /\b(if|elif|while|switch)\b\s*\((.*)\)/.exec(l) ?? /\b(if|elif|while)\b\s+(.*):\s*$/.exec(l);
+    if (m) for (const w of m[2].match(/[A-Za-z_$][\w$]*(?:\.[\w$]+)*/g) ?? []) {
+      const last = w.split(".").pop();
+      if (!KEYWORDS.has(last) && last.length > 1) vars.set(last, (vars.get(last) ?? 0) + (m[1] === "switch" ? body.filter((x) => /\bcase\b/.test(x)).length : 1));
+    }
+  }
+  return { score, drivers: [...vars].sort((a, b) => b[1] - a[1]).slice(0, 2).filter(([, n]) => n >= 2).map(([v]) => v) };
+}
 function blankCode(src) {
   const out = [];
   let inBlock = false;
@@ -1172,13 +1269,54 @@ function detectSmell(kind, content, max = SMELL_DEFAULTS[kind]) {
     for (const [v, at] of seen) if (at.length >= max) hits.push({ line: at[max - 1], message: `String "${v.length > 30 ? v.slice(0, 27) + "\u2026" : v}" repeated ${at.length} times` });
     return hits;
   }
+  if (kind === "complexity") {
+    for (const f of functionSpans(lines, isPython)) {
+      const { score, drivers } = complexityOf(lines.slice(f.open + 1, f.end));
+      if (score > max) {
+        hits.push({
+          line: f.start + 1,
+          message: `Function ${f.name} has ${score} decision paths (more than ${max})`,
+          advice: drivers.length ? `Most branches test ${drivers.map((d) => `\`${d}\``).join(" and ")}: a lookup table or one small function per case would replace them.` : `Return early for the simple cases, and extract each remaining branch into a named function.`
+        });
+      }
+    }
+    return hits;
+  }
+  if (kind === "duplicate-block") {
+    const spans = functionSpans(lines, isPython);
+    const fnAt = (i) => spans.filter((f) => i >= f.start && i <= f.end).sort((a, b) => b.start - a.start)[0]?.name;
+    const norm = lines.map((l) => l.trim().replace(/(["'`])\s*\1/g, "S").replace(/\s+/g, " ").replace(/\b\d+(\.\d+)?\b/g, "N").replace(/[A-Za-z_$][\w$]*/g, (w) => KEYWORDS.has(w) ? w : "I"));
+    const seen = /* @__PURE__ */ new Map();
+    for (let i = 0; i + 6 <= norm.length; i++) {
+      const win = norm.slice(i, i + 6);
+      if (win.filter((x) => x.length > 3 && !/^[{}()\];,]*$/.test(x)).length < 5) continue;
+      const k = win.join("\n");
+      seen.set(k, [...seen.get(k) ?? [], i]);
+    }
+    const groups = [...seen.values()].filter((at) => at.length >= max).sort((a, b) => b.length - a.length);
+    const reported = /* @__PURE__ */ new Set();
+    for (const at of groups) {
+      if (at.some((i) => reported.has(i))) continue;
+      at.forEach((i) => {
+        for (let d = -5; d <= 5; d++) reported.add(i + d);
+      });
+      const names = [...new Set(at.map(fnAt).filter(Boolean))];
+      hits.push({
+        line: at[1] + 1,
+        message: `The same block appears ${at.length} times in this file`,
+        advice: names.length > 1 ? `It is repeated in ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` and ${names.length - 3} more` : ""}: keep one function, and pass what differs as a parameter.` : `Keep one copy in a named function and call it from each place.`
+      });
+    }
+    return hits;
+  }
   if (kind === "too-many-params") {
     lines.forEach((l, i) => {
       for (const rx of FN_START) {
         const m = rx.exec(l);
         if (!m) continue;
         const n = paramCount(m[1] ?? "");
-        if (n > max) hits.push({ line: i + 1, message: `Function takes ${n} parameters (more than ${max})` });
+        const names = (m[1] ?? "").split(",").map((p) => p.trim().split(/[\s:=?]/)[0]).filter(Boolean);
+        if (n > max) hits.push({ line: i + 1, message: `Function takes ${n} parameters (more than ${max})`, advice: `Parameters ${names.join(", ")}: group the ones that always travel together into one object with a name.` });
         break;
       }
     });
@@ -1197,7 +1335,7 @@ function detectSmell(kind, content, max = SMELL_DEFAULTS[kind]) {
           end = j;
         }
         const len = lines.slice(i + 1, end + 1).filter((x) => x.trim()).length;
-        if (len > max) hits.push({ line: i + 1, message: `Function ${m[2]} is ${len} lines long (more than ${max})` });
+        if (len > max) hits.push({ line: i + 1, message: `Function ${m[2]} is ${len} lines long (more than ${max})`, advice: longFunctionAdvice(lines.slice(i + 1, end + 1), m[2]) });
       });
       return hits;
     }
@@ -1224,7 +1362,7 @@ function detectSmell(kind, content, max = SMELL_DEFAULTS[kind]) {
       const body = lines.slice(open + 1, end).filter((x) => x.trim()).length;
       if (body > max) {
         const name = /([\w$]+)\s*(?:=\s*(?:async\s*)?)?\(/.exec(lines[i])?.[1] ?? "function";
-        hits.push({ line: i + 1, message: `Function ${name} is ${body} lines long (more than ${max})` });
+        hits.push({ line: i + 1, message: `Function ${name} is ${body} lines long (more than ${max})`, advice: longFunctionAdvice(lines.slice(open + 1, end), name) });
         i = open;
       }
     }
@@ -1326,8 +1464,23 @@ function base(rule, file, line, message, cat, sev) {
     why: rule.why,
     sources: rule.sources,
     ...rule.coach ? { coach: rule.coach } : {},
+    ...classify(rule, rule.category ?? cat, rule.severity ?? sev, mode === "enforce"),
     ...typeof rule.fix === "string" ? { fixText: rule.fix } : {}
   };
+}
+function classify(rule, category, severity, blocking) {
+  const smell = rule.smell?.kind;
+  let kind, risk;
+  if (category === "security") [kind, risk] = ["Security", "high"];
+  else if (category === "architecture") [kind, risk] = ["Architecture", "medium"];
+  else if (category === "dependency") [kind, risk] = ["Dependencies", "medium"];
+  else if (rule.id === "focused-test") [kind, risk] = ["Error prone", "high"];
+  else if (category === "testing") [kind, risk] = ["Tests", rule.id === "skipped-test" ? "low" : "medium"];
+  else if (smell === "duplicate-block" || smell === "duplicated-literal") [kind, risk] = ["Duplication", smell === "duplicate-block" ? "medium" : "low"];
+  else if (smell || rule.changeSize) [kind, risk] = ["Complexity", smell === "complexity" ? "medium" : "low"];
+  else [kind, risk] = ["Best practice", severity === "error" ? "medium" : "low"];
+  if (blocking || severity === "error") risk = "high";
+  return { risk: rule.risk ?? risk, kind: rule.kind ?? kind };
 }
 function isSuppressed(file, f) {
   const lines = file.content ? file.content.split(/\r?\n/) : null;
@@ -1447,7 +1600,7 @@ function checkSmell(rule, file) {
   if (!file.content) return [];
   const added = new Set(file.addedLines.map((l) => l.line));
   const whole = file.status === "added" || added.size >= file.content.split(/\r?\n/).length;
-  return detectSmell(rule.smell.kind, file.content, rule.smell.max).filter((h) => whole || added.has(h.line)).map((h) => base(rule, file.path, h.line, h.message, "quality", "info"));
+  return detectSmell(rule.smell.kind, file.content, rule.smell.max).filter((h) => whole || added.has(h.line)).map((h) => ({ ...base(rule, file.path, h.line, h.message, "quality", "info"), ...h.advice ? { fixText: h.advice } : {} }));
 }
 function checkRequireTest(rule, files) {
   const out = [];
@@ -1606,12 +1759,15 @@ function reportToMarkdown(r, title = "Copal check") {
   const status = r.blocking ? "\u{1F534} **Changes requested**" : r.findings.length ? "\u{1F7E1} **Passed with audit findings**" : "\u{1F7E2} **Passed**";
   const out = [`### ${title}`, "", `${status} \u2014 ${r.summary.blocking} blocking \xB7 ${r.summary.audit} audit \xB7 env \`${r.environment}\``, ""];
   if (r.findings.length) {
-    out.push("| | Rule | Location | Finding |", "|---|---|---|---|");
-    for (const g of groupFindings(r.findings)) {
+    out.push("| Risk | Rule | Location | Finding |", "|---|---|---|---|");
+    const order = { high: 0, medium: 1, low: 2 };
+    for (const g of groupFindings(r.findings).sort((a, b) => (order[a[0].risk ?? "low"] ?? 3) - (order[b[0].risk ?? "low"] ?? 3))) {
       const f = g[0];
-      const text = f.coach?.question ? `${f.message} \u2014 _${f.coach.question}_` : f.message;
+      const advice = f.fixText && (f.kind === "Complexity" || f.kind === "Duplication") ? ` **Suggestion:** ${f.fixText}` : "";
+      const text = (f.coach?.question ? `${f.message} \u2014 _${f.coach.question}_` : f.message) + advice;
       const where = g.length > 1 ? `\`${f.file}:${f.line}\` +${g.length - 1} more` : `\`${f.file}:${f.line}\``;
-      out.push(`| ${f.blocking ? "\u26D4" : f.coach ? "\u{1F4AC}" : "\u26A0\uFE0F"} | \`${f.ruleId}\` | ${where} | ${text.replace(/\|/g, "\\|")}${g.length > 1 ? ` (${g.length}\xD7)` : ""} |`);
+      const risk = f.blocking ? "\u26D4 Blocking" : f.risk === "high" ? "\u{1F534} High" : f.risk === "medium" ? "\u{1F7E0} Medium" : "\u26AA Low";
+      out.push(`| ${risk}${f.kind ? `<br><sub>${f.kind}</sub>` : ""} | \`${f.ruleId}\` | ${where} | ${text.replace(/\|/g, "\\|")}${g.length > 1 ? ` (${g.length}\xD7)` : ""} |`);
     }
   }
   out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
@@ -2261,6 +2417,7 @@ export {
   buildBrief,
   changeSizeOf,
   changedLineSet,
+  classify,
   concreteTestPath,
   containsCode,
   cyan,

@@ -61,12 +61,16 @@ export interface Rule {
   fix?: { replace?: string; with: string } | string;
   /** Coaching content (v4). */
   coach?: Coach;
+  /** Overrides the risk Copal derives from the rule (high · medium · low). */
+  risk?: Risk;
+  /** Overrides the issue family Copal derives from the rule. */
+  kind?: IssueKind;
   /** Built-in hard-coded credential detectors (+ policy `redact` patterns). */
   secrets?: boolean;
   /** Dependency policy applied to package.json changes. */
   dependencies?: { allow?: string[]; deny?: string[] };
   /** Code smell (heuristic, needs full file content): long-function, deep-nesting, too-many-params, large-file, duplicated-literal. */
-  smell?: { kind: "long-function" | "deep-nesting" | "too-many-params" | "large-file" | "duplicated-literal"; max?: number };
+  smell?: { kind: "long-function" | "deep-nesting" | "too-many-params" | "large-file" | "duplicated-literal" | "complexity" | "duplicate-block"; max?: number };
   /** Changes to `paths` must come with a changed test file matching this template ({name}, {dir}). */
   requireTest?: { test: string };
   /** Small, verified steps: the whole change (all in-scope files) should stay under `maxLines` changed lines and `maxFiles` files. */
@@ -135,7 +139,14 @@ export interface Finding {
   sources?: string[];
   /** Coaching content copied from the rule (v4). */
   coach?: Coach;
+  /** How risky the issue is, for ranking and labels: high · medium · low. */
+  risk?: Risk;
+  /** Plain-language family shown to people: Security, Error prone, Complexity, Duplication, Tests, Architecture, Dependencies, Best practice. */
+  kind?: IssueKind;
 }
+
+export type Risk = "high" | "medium" | "low";
+export type IssueKind = "Security" | "Error prone" | "Complexity" | "Duplication" | "Tests" | "Architecture" | "Dependencies" | "Best practice";
 
 export interface Report {
   environment: string;

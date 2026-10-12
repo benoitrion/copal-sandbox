@@ -64,6 +64,10 @@ export interface Rule {
     } | string;
     /** Coaching content (v4). */
     coach?: Coach;
+    /** Overrides the risk Copal derives from the rule (high · medium · low). */
+    risk?: Risk;
+    /** Overrides the issue family Copal derives from the rule. */
+    kind?: IssueKind;
     /** Built-in hard-coded credential detectors (+ policy `redact` patterns). */
     secrets?: boolean;
     /** Dependency policy applied to package.json changes. */
@@ -73,7 +77,7 @@ export interface Rule {
     };
     /** Code smell (heuristic, needs full file content): long-function, deep-nesting, too-many-params, large-file, duplicated-literal. */
     smell?: {
-        kind: "long-function" | "deep-nesting" | "too-many-params" | "large-file" | "duplicated-literal";
+        kind: "long-function" | "deep-nesting" | "too-many-params" | "large-file" | "duplicated-literal" | "complexity" | "duplicate-block";
         max?: number;
     };
     /** Changes to `paths` must come with a changed test file matching this template ({name}, {dir}). */
@@ -142,7 +146,13 @@ export interface Finding {
     sources?: string[];
     /** Coaching content copied from the rule (v4). */
     coach?: Coach;
+    /** How risky the issue is, for ranking and labels: high · medium · low. */
+    risk?: Risk;
+    /** Plain-language family shown to people: Security, Error prone, Complexity, Duplication, Tests, Architecture, Dependencies, Best practice. */
+    kind?: IssueKind;
 }
+export type Risk = "high" | "medium" | "low";
+export type IssueKind = "Security" | "Error prone" | "Complexity" | "Duplication" | "Tests" | "Architecture" | "Dependencies" | "Best practice";
 export interface Report {
     environment: string;
     /** Policy stance the report was produced under (v4). */
@@ -236,6 +246,11 @@ export interface EvaluateOptions {
     only?: string[];
 }
 export declare function evaluate(changes: FileChange[], policy: Policy, opts?: EvaluateOptions): Report;
+/** Risk and family of a rule's findings: what a lead sees first, in every surface. Rules can override both. */
+export declare function classify(rule: Rule, category: Category | string, severity: Severity | string, blocking: boolean): {
+    risk: Risk;
+    kind: IssueKind;
+};
 export declare function parseDeny(deny: string): {
     from: string[];
     to: string[];

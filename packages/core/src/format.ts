@@ -70,13 +70,16 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
   const status = r.blocking ? "🔴 **Changes requested**" : r.findings.length ? "🟡 **Passed with audit findings**" : "🟢 **Passed**";
   const out = [`### ${title}`, "", `${status} — ${r.summary.blocking} blocking · ${r.summary.audit} audit · env \`${r.environment}\``, ""];
   if (r.findings.length) {
-    out.push("| | Rule | Location | Finding |", "|---|---|---|---|");
+    out.push("| Risk | Rule | Location | Finding |", "|---|---|---|---|");
     // One row per rule and file: repeats of the same hint are counted, not listed (noise makes people stop reading).
-    for (const g of groupFindings(r.findings)) {
+    const order: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    for (const g of groupFindings(r.findings).sort((a, b) => (order[a[0].risk ?? "low"] ?? 3) - (order[b[0].risk ?? "low"] ?? 3))) {
       const f = g[0];
-      const text = f.coach?.question ? `${f.message} — _${f.coach.question}_` : f.message;
+      const advice = f.fixText && (f.kind === "Complexity" || f.kind === "Duplication") ? ` **Suggestion:** ${f.fixText}` : "";
+      const text = (f.coach?.question ? `${f.message} — _${f.coach.question}_` : f.message) + advice;
       const where = g.length > 1 ? `\`${f.file}:${f.line}\` +${g.length - 1} more` : `\`${f.file}:${f.line}\``;
-      out.push(`| ${f.blocking ? "⛔" : f.coach ? "💬" : "⚠️"} | \`${f.ruleId}\` | ${where} | ${text.replace(/\|/g, "\\|")}${g.length > 1 ? ` (${g.length}×)` : ""} |`);
+      const risk = f.blocking ? "⛔ Blocking" : f.risk === "high" ? "🔴 High" : f.risk === "medium" ? "🟠 Medium" : "⚪ Low";
+      out.push(`| ${risk}${f.kind ? `<br><sub>${f.kind}</sub>` : ""} | \`${f.ruleId}\` | ${where} | ${text.replace(/\|/g, "\\|")}${g.length > 1 ? ` (${g.length}×)` : ""} |`);
     }
   }
   out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
