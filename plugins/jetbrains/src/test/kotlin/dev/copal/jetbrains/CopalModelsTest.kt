@@ -55,10 +55,11 @@ class CopalModelsTest {
         val f = r.findings[0]
         assertTrue(f.coached)
         assertEquals("const total = LedgerPort.round(sum, Currency.EUR);", f.fix)
-        assertEquals("Copal [ledger-rounding] Inline rounding bypasses LedgerPort — Who owns rounding in this codebase?", CopalText.message(f))
+        assertEquals("Who owns rounding in this codebase? (Inline rounding bypasses LedgerPort)", CopalText.message(f))
         val tip = CopalText.tooltipHtml(f)
         assertTrue(tip.contains("<b>Who owns rounding in this codebase?</b>"))
-        assertTrue(tip.contains("Ask me · Explain · Show me"))
+        assertTrue(tip.contains("Fix with my assistant · Not relevant"))
+        assertTrue(!tip.contains("Ask me"))
         assertTrue("fix stays hidden until Show me", !tip.contains("LedgerPort.round(sum"))
         assertEquals(3, CopalText.explainLevel(f))
         assertTrue(CopalText.explainText(f).contains("Prefer:     LedgerPort.round(x, Currency.EUR)"))
@@ -155,5 +156,12 @@ class CopalModelsTest {
         assertNotNull(r)
         assertEquals("Not in the brief: src/web/settings-page.ts — keep it?", r!!.items.orEmpty().single().question)
         assertEquals(false, CopalJson.parseScopeCheck("{\"brief\": false, \"items\": []}")!!.brief)
+    }
+
+    @Test
+    fun `test path and assistant request come from the finding`() {
+        assertEquals("src/payments/reminders.test.ts", CopalText.testPathIn("No test changed for reminders.ts (for example src/payments/reminders.test.ts)"))
+        assertEquals(null, CopalText.testPathIn("Inline rounding bypasses LedgerPort"))
+        assertTrue(CopalText.testSkeleton("src/a/b.test.ts", "src/a/b.ts").contains("first example"))
     }
 }

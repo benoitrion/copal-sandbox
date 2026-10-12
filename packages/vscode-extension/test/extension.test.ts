@@ -159,8 +159,8 @@ test("extension reports findings and offers quick fixes", async (t) => {
   assert.match(statusBar.text, /Copal 2/);
 
   const actions = provider.provideCodeActions(d, rounding.range, { diagnostics: [rounding] });
-  // billing-api rules are coached (v4): Ask me · Explain · Show me (the correction) · false positive
-  assert.deepEqual(actions.map((a: CodeAction) => a.title.replace(/ \(.*$/, "")), ["Copal: Ask me", "Copal: Explain", "Copal: Show me", "Copal: mark as false positive"]);
+  // Coached rules: Show me (the correction) · Fix with my assistant · Not relevant here — no repeated "Ask me / Explain"
+  assert.deepEqual(actions.map((a: CodeAction) => a.title.replace(/ \(.*$/, "")), ["Copal: Show me", "Copal: Fix with my assistant", "Copal: Not relevant here"]);
   const showMe = actions.find((a: CodeAction) => a.title.startsWith("Copal: Show me"));
   assert.equal(showMe.edit.ops[0].text, "  const total = LedgerPort.round(sum, Currency.EUR);");
   assert.equal(showMe.isPreferred, false, "the fix is never the preferred one-click action for coached rules");
@@ -192,10 +192,13 @@ test("coached findings lead with the question; the fix is behind Show me", async
   const rounding = found.find((x) => x.code === "ledger-rounding")!;
   assert.match(rounding.message, /Who owns rounding/);
   const titles = provider.provideCodeActions(d, rounding.range, { diagnostics: [rounding] }).map((a: CodeAction) => a.title);
-  assert.deepEqual(titles.slice(0, 3), ["Copal: Ask me (ledger-rounding)", "Copal: Explain (ledger-rounding)", "Copal: Show me (ledger-rounding)"]);
+  assert.deepEqual(titles.slice(0, 2), ["Copal: Show me (ledger-rounding)", "Copal: Fix with my assistant"]);
   const hover = hoverProvider.provideHover(d, new Position(7, 4));
   assert.match(hover.contents.value, /\*\*Who owns rounding in this codebase\?\*\*/);
-  assert.match(hover.contents.value, /command:copal\.ask/);
+  assert.equal((hover.contents.value.match(/Who owns rounding/g) ?? []).length, 1, "the question appears once");
+  assert.match(hover.contents.value, /command:copal\.fixWithAssistant/);
+  assert.match(hover.contents.value, /command:copal\.notRelevant/);
+  assert.doesNotMatch(hover.contents.value, /command:copal\.ask/);
   assert.match(hover.contents.value, /command:copal\.showMe/);
   assert.ok(commands["copal.pair"], "navigator command registered");
   ctx.subscriptions.forEach((s) => s.dispose());
@@ -257,4 +260,35 @@ test("Review my change: scenario 01 in a git repo → panel with three hint card
   const call = executed.find((e) => e.name === "copal.explain")!;
   assert.ok(call, "buttons run the existing ladder commands");
   assert.match((call.args[0] as { uri: string }).uri, /src\/invoice\/total\.ts$/);
+});
+
+test("only lines changed since the last commit get hints", () => {
+  const { execFileSync } = require("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "copal-changed-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  fs.writeFileSync(path.join(dir, "a.ts"), "one\ntwo\nthree\n");
+  execFileSync("git", ["add", "."], { cwd: dir });
+  execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], { cwd: dir });
+  const ext = require("../src/extension");
+  assert.deepEqual([...ext.changedLines(dir, "a.ts", "one\ntwo\nthree\n")], [], "untouched file: no hints");
+  assert.deepEqual([...ext.changedLines(dir, "a.ts", "one\nTWO\nthree\nfour\n")], [2, 4]);
+  assert.equal(ext.changedLines(dir, "new.ts", "x"), null, "uncommitted file: everything is new");
+});
+
+test("Fix with my assistant hands over the rule, its reason and the fix", () => {
+  const ext = require("../src/extension");
+  const p = ext.assistantPrompt({ ruleId: "ledger-rounding", file: "src/a.ts", line: 3, message: "Inline rounding bypasses LedgerPort", why: "Rounding in one place keeps invoices reconciled." }, "LedgerPort.round(x, Currency.EUR)");
+  assert.match(p, /src\/a\.ts at line 3/);
+  assert.match(p, /team rule "ledger-rounding": Rounding in one place/);
+  assert.match(p, /preferred fix: LedgerPort\.round/);
+});
+
+test("Create the test writes a first example to fill in, next to the code", () => {
+  const ext = require("../src/extension");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "copal-skel-"));
+  fs.writeFileSync(path.join(dir, "package.json"), '{"devDependencies":{"vitest":"1"}}');
+  const s = ext.testSkeleton(dir, path.join(dir, "src/payments/reminders.test.ts"), path.join(dir, "src/payments/reminders.ts"), "reminders");
+  assert.match(s, /from "vitest"/);
+  assert.match(s, /import \* as subject from "\.\/reminders"/);
+  assert.match(s, /first example/);
 });

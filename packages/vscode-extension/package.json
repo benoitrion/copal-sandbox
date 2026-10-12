@@ -58,6 +58,18 @@
       {
         "command": "copal.reviewChange",
         "title": "Copal: Review my change"
+      },
+      {
+        "command": "copal.createTest",
+        "title": "Copal: Create the test"
+      },
+      {
+        "command": "copal.fixWithAssistant",
+        "title": "Copal: Fix with my assistant"
+      },
+      {
+        "command": "copal.notRelevant",
+        "title": "Copal: Not relevant here"
       }
     ],
     "configuration": {
@@ -76,6 +88,15 @@
         "copal.checkOnSave": {
           "type": "boolean",
           "default": true
+        },
+        "copal.hints": {
+          "type": "string",
+          "enum": [
+            "changed",
+            "all"
+          ],
+          "default": "changed",
+          "description": "Show hints on code changed since the last commit only (default), or on all code."
         }
       }
     }

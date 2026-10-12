@@ -63,20 +63,17 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
         val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return
         for (f in result.findings) {
             val range = rangeFor(document, f) ?: continue
-            val severity = when {
-                f.blocking -> HighlightSeverity.ERROR
-                f.severity == "info" -> HighlightSeverity.WEAK_WARNING
-                else -> HighlightSeverity.WARNING
-            }
+            // Coaching is a conversation, not an error: only rules the team set to block are red.
+            val severity = if (f.blocking) HighlightSeverity.ERROR else HighlightSeverity.WEAK_WARNING
             var builder = holder.newAnnotation(severity, CopalText.message(f))
                 .range(range)
                 .tooltip(CopalText.tooltipHtml(f))
+            if (CopalText.testPathIn(f.message) != null) builder = builder.withFix(CreateTestFix(f))
             if (f.coached) {
-                // Hint ladder: question first, explanation next, the fix only on request.
-                if (f.coach?.question != null) builder = builder.withFix(AskMeFix(f))
-                builder = builder.withFix(ExplainFix(f))
+                // The question is in the tooltip; the fix only on request.
                 if (f.fix != null) builder = builder.withFix(ShowMeFix(f))
             } else if (f.suggestion != null) builder = builder.withFix(ApplySuggestionFix(f))
+            builder = builder.withFix(FixWithAssistantFix(f))
             if (CopalText.commentPrefix(file.name) != null) builder = builder.withFix(MarkFalsePositiveFix(f))
             builder.create()
             // growth metric: a hint counts as "shown" once per file, rule and line per IDE session

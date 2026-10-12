@@ -230,7 +230,7 @@ function checkRequireTest(rule: Rule, files: FileChange[]): Finding[] {
     const name = posix.basename(file.path).replace(/\.[^.]+$/, "");
     const expected = rule.requireTest!.test.replace(/\{dir\}/g, dir).replace(/\{name\}/g, name);
     if (!files.some((f) => matchGlob(f.path, expected))) {
-      out.push(base(rule, file.path, file.addedLines[0]?.line ?? 1, `Change has no accompanying test (expected ${expected})`, "testing", "warning"));
+      out.push(base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${posix.basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning"));
     }
   }
   return out;
@@ -252,6 +252,23 @@ function checkChangeSize(rule: Rule, files: FileChange[]): Finding[] {
   if (!over.length) return [];
   const first = files.find((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude))!;
   return [base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info")];
+}
+
+/**
+ * A concrete test path from a glob template, for messages and "Create the test":
+ * "src/**\/reminders.test.ts" for src/payments/reminders.ts → "src/payments/reminders.test.ts".
+ */
+export function concreteTestPath(expected: string, file: string): string {
+  const i = expected.indexOf("**");
+  if (i < 0) return expected;
+  const prefix = expected.slice(0, i);
+  const dirSegs = posix.dirname(file).split("/");
+  const preSegs = prefix.split("/").filter(Boolean);
+  // Continue after the last folder the template's prefix shares with the file (src/main/java → src/test/java).
+  let at = -1;
+  for (let k = preSegs.length - 1; k >= 0 && at < 0; k--) at = dirSegs.lastIndexOf(preSegs[k]);
+  const rest = (at >= 0 ? dirSegs.slice(at + 1) : dirSegs.slice(1)).join("/");
+  return (prefix + rest + "/" + expected.slice(i + 2).replace(/^\/+/, "")).replace(/\/+/g, "/");
 }
 
 // ---------------------------------------------------------------- redaction
@@ -324,4 +341,29 @@ export function testOrderFindings(policy: Policy, commits: CommitFiles[], enviro
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------- changed code only (IDE)
+/**
+ * Lines (1-based) of `current` that are not in `head` (the committed version), matched as a multiset so moved
+ * lines don't count. `head` undefined (new or uncommitted file) → null: every line is new.
+ */
+export function changedLineSet(head: string | undefined, current: string): Set<number> | null {
+  if (head === undefined) return null;
+  const before = new Map<string, number>();
+  for (const l of head.split(/\r?\n/)) before.set(l, (before.get(l) ?? 0) + 1);
+  const out = new Set<number>();
+  current.split(/\r?\n/).forEach((l, i) => {
+    const n = before.get(l) ?? 0;
+    if (n > 0) before.set(l, n - 1);
+    else out.add(i + 1);
+  });
+  return out;
+}
+
+/** Keeps findings on changed lines; file-level rules (tests with the change, change size) only when the file changed. */
+export function onChangedLines(findings: Finding[], policy: Policy, file: string, changed: Set<number> | null): Finding[] {
+  if (!changed) return findings.filter((f) => f.file === file);
+  const fileLevel = new Set(policy.rules.filter((r) => r.requireTest || r.changeSize).map((r) => r.id));
+  return findings.filter((f) => f.file === file && (changed.has(f.line) || (fileLevel.has(f.ruleId) && changed.size > 0)));
 }

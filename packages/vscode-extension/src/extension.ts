@@ -7,6 +7,9 @@ import {
   mergeManagedBlock,
   applicableRules,
   briefToText,
+  concreteTestPath,
+  changedLineSet,
+  onChangedLines,
   buildBrief,
   evaluate,
   fileAsChange,
@@ -39,7 +42,7 @@ const heartbeats: { file: string; ts: number; editor: string }[] = [];
 
 function cfg() {
   const c = vscode.workspace.getConfiguration("copal");
-  return { serverUrl: c.get<string>("serverUrl", ""), environment: c.get<string>("environment", "local"), checkOnSave: c.get<boolean>("checkOnSave", true) };
+  return { serverUrl: c.get<string>("serverUrl", ""), environment: c.get<string>("environment", "local"), checkOnSave: c.get<boolean>("checkOnSave", true), hints: c.get<string>("hints", "changed") };
 }
 
 function policyFor(doc: vscode.TextDocument): { policy: Policy; root: string } | null {
@@ -59,8 +62,9 @@ function toDiagnostic(doc: vscode.TextDocument, f: Finding): vscode.Diagnostic {
   const end = f.endColumn ? f.endColumn - 1 : text.length;
   const d = new vscode.Diagnostic(
     new vscode.Range(line, start, line, Math.max(end, start + 1)),
-    f.coach?.question ? `${f.message} — ${f.coach.question}` : `${f.message}${f.why ? ` — ${f.why}` : ""}`,
-    f.blocking ? vscode.DiagnosticSeverity.Error : f.severity === "info" ? vscode.DiagnosticSeverity.Information : vscode.DiagnosticSeverity.Warning,
+    f.coach?.question ? `${f.coach.question} (${f.message})` : `${f.message}${f.why ? ` — ${f.why}` : ""}`,
+    // Coaching is a conversation, not an error: only rules the team set to block get a red squiggle.
+    f.blocking ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Information,
   );
   d.source = SOURCE;
   d.code = f.ruleId;
@@ -75,7 +79,14 @@ function check(doc: vscode.TextDocument) {
   }
   const rel = path.relative(p.root, doc.uri.fsPath).split(path.sep).join("/");
   if (rel.startsWith("..")) return;
-  const report = evaluate([fileAsChange(rel, doc.getText())], p.policy, { environment: cfg().environment });
+  // Other files changed in the working tree (so a test written next to this file counts), without their contents.
+  const others = changedPaths(p.root).filter((x) => x !== rel).map((x) => ({ path: x, status: "modified" as const, addedLines: [] }));
+  const full = evaluate([fileAsChange(rel, doc.getText()), ...others], p.policy, { environment: cfg().environment });
+  // Only code changed since the last commit gets hints (like "clean as you code"); untouched code stays quiet.
+  const changed = cfg().hints === "all" ? null : changedLines(p.root, rel, doc.getText());
+  const keep = onChangedLines(full.findings, p.policy, rel, changed);
+  const report = { ...full, findings: keep, blocking: keep.some((f) => f.blocking), summary: { ...full.summary, total: keep.length, blocking: keep.filter((f) => f.blocking).length, audit: keep.filter((f) => !f.blocking).length } };
+  policyOf.set(doc.uri.toString(), p.policy);
   findingsByUri.set(doc.uri.toString(), report.findings);
   rootOf.set(doc.uri.toString(), p.root);
   projectOf.set(doc.uri.toString(), p.policy.project);
@@ -88,6 +99,24 @@ function check(doc: vscode.TextDocument) {
   status.tooltip = `${report.summary.blocking} blocking · ${report.summary.audit} audit (${report.environment})`;
   status.show();
   heartbeats.push({ file: rel, ts: Date.now(), editor: "vscode" });
+}
+
+// ---------------------------------------------------------------- changed code only
+const policyOf = new Map<string, Policy>();
+
+/** Paths changed in the working tree against HEAD, plus untracked files. Empty outside git. */
+function changedPaths(root: string): string[] {
+  const tracked = gitOut(["diff", "--name-only", "HEAD"], root) ?? "";
+  const untracked = gitOut(["ls-files", "--others", "--exclude-standard"], root) ?? "";
+  return (tracked + "\n" + untracked).split("\n").map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * Line numbers (1-based) of the current text that are not in HEAD's version of the file.
+ * New, untracked or non-git files: every line counts as changed. Unchanged file: empty set.
+ */
+export function changedLines(root: string, rel: string, current: string): Set<number> | null {
+  return changedLineSet(gitOut(["show", `HEAD:${rel}`], root), current);
 }
 
 // ---------------------------------------------------------------- coaching
@@ -136,15 +165,23 @@ async function coachEvent(f: Finding, levelReached: HintLevel, action: string, u
 
 const cmdLink = (label: string, command: string, ref: FindingRef) => `[${label}](command:${command}?${encodeURIComponent(JSON.stringify([ref]))})`;
 
-/** The hint card shown on hover: signal + question, then the ladder as links. */
-export function hintCardMarkdown(f: Finding, uri: string): string {
+/** The hint card shown on hover: the question once, one line of why, then real actions. */
+export function hintCardMarkdown(f: Finding, uri: string, policy?: Policy): string {
   const c = hintCard(f);
   const ref: FindingRef = { uri, ruleId: f.ruleId, line: f.line };
-  const out = [`**${f.blocking ? "$(error)" : "$(comment-discussion)"} ${c.title}**`, "", c.signal];
-  if (c.question) out.push("", `**${c.question}**`);
-  const links = [c.question ? cmdLink("Ask me", "copal.ask", ref) : "", cmdLink("Explain", "copal.explain", ref), c.fix ? cmdLink("Show me", "copal.showMe", ref) : ""].filter(Boolean);
+  const icon = f.blocking ? "$(error)" : "$(comment-discussion)";
+  const out = [`${icon} **${c.question ?? c.signal}**`, ""];
+  out.push(c.question ? `${c.signal}${c.why ? ` · *${c.why}*` : ""}` : c.why ? `*${c.why}*` : "");
+  const rule = policy?.rules.find((r) => r.id === f.ruleId);
+  const links = [
+    rule?.requireTest ? cmdLink("Create the test", "copal.createTest", ref) : "",
+    c.fix ? cmdLink("Show me", "copal.showMe", ref) : "",
+    cmdLink("Fix with my assistant", "copal.fixWithAssistant", ref),
+    cmdLink("Not relevant", "copal.notRelevant", ref),
+  ].filter(Boolean);
   out.push("", links.join(" · "));
-  if (c.kata) out.push("", `Practice: [kata](${c.kata})${c.learningHour ? ` · learning hour *${c.learningHour}*` : ""}`);
+  if (c.kata) out.push("", `$(mortar-board) Practice: [kata](${c.kata})`);
+  out.push("", `*Copal · ${f.ruleId}*`);
   return out.join("\n");
 }
 
@@ -152,8 +189,8 @@ class Hovers implements vscode.HoverProvider {
   provideHover(doc: vscode.TextDocument, pos: vscode.Position): vscode.Hover | undefined {
     const f = (findingsByUri.get(doc.uri.toString()) ?? []).find((x) => x.line - 1 === pos.line);
     if (!f) return undefined;
-    const md = new vscode.MarkdownString(hintCardMarkdown(f, doc.uri.toString()), true);
-    md.isTrusted = { enabledCommands: ["copal.ask", "copal.explain", "copal.showMe"] };
+    const md = new vscode.MarkdownString(hintCardMarkdown(f, doc.uri.toString(), policyOf.get(doc.uri.toString())), true);
+    md.isTrusted = { enabledCommands: ["copal.showMe", "copal.createTest", "copal.fixWithAssistant", "copal.notRelevant"] };
     void coachEvent(f, f.coach?.question ? 1 : 0, "shown", doc.uri.toString());
     return new vscode.Hover(md);
   }
@@ -228,6 +265,81 @@ async function offerKata(kata: string, ruleId: string, uri: string) {
     const ok = await kataDoneRequest(serverUrl, await extCtx.secrets.get("copal.apiKey"), kata, root ? gitAuthor(root) : undefined, ruleId);
     void vscode.window.showInformationMessage(ok ? "Copal: kata recorded. Nice work." : "Copal: could not record the kata (server unreachable).");
   }
+}
+
+// ---------------------------------------------------------------- actions: create the test, fix with my assistant, not relevant
+/** "Create the test": opens the test the rule expects, creating it with a first example to fill in when it is missing. */
+async function createTest(ref: FindingRef) {
+  const f = findingFor(ref);
+  const policy = policyOf.get(ref.uri);
+  const root = rootOf.get(ref.uri);
+  const rule = policy?.rules.find((r) => r.id === ref.ruleId);
+  if (!f || !root || !rule?.requireTest) return;
+  const dir = path.posix.dirname(f.file);
+  const name = path.posix.basename(f.file).replace(/\.[^.]+$/, "");
+  const target = concreteTestPath(rule.requireTest.test.replace(/\{dir\}/g, dir).replace(/\{name\}/g, name), f.file);
+  const abs = path.join(root, target);
+  if (!fs.existsSync(abs)) {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, testSkeleton(root, abs, path.join(root, f.file), name));
+  }
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(abs));
+  void coachEvent(f, 4, "create_test", ref.uri);
+}
+
+/** A first test to fill in: the developer writes the example; Copal never invents the assertion. */
+export function testSkeleton(root: string, testAbs: string, sourceAbs: string, name: string): string {
+  let rel = path.relative(path.dirname(testAbs), sourceAbs).split(path.sep).join("/").replace(/\.(ts|tsx|js|jsx)$/, "");
+  if (!rel.startsWith(".")) rel = "./" + rel;
+  if (/\.(ts|tsx|js|jsx|mjs)$/.test(testAbs)) {
+    let pkg = "";
+    try { pkg = fs.readFileSync(path.join(root, "package.json"), "utf8"); } catch { /* none */ }
+    const head = /"vitest"/.test(pkg) ? `import { describe, expect, it } from "vitest";\n` : "";
+    return `${head}import * as subject from "${rel}";\n\ndescribe("${name}", () => {\n  it("first example: given …, expect …", () => {\n    // Write the business rule as an example, then make it pass.\n    expect(subject).toBeDefined();\n  });\n});\n`;
+  }
+  if (/\.py$/.test(testAbs)) return `def test_first_example():\n    # Write the business rule as an example, then make it pass.\n    assert True\n`;
+  return "";
+}
+
+/** "Fix with my assistant": hands the hint to the developer's AI chat with the team's rule and reason. */
+export function assistantPrompt(f: Finding, fixText?: string): string {
+  return [
+    `Fix this in ${f.file} at line ${f.line}: ${f.message}.`,
+    `It breaks our team rule "${f.ruleId}"${f.why ? `: ${f.why}` : "."}`,
+    fixText ? `The team's preferred fix: ${fixText}` : "",
+    "Keep the change small, follow the rule, and add or update a test that proves it.",
+  ].filter(Boolean).join("\n");
+}
+
+async function fixWithAssistant(ref: FindingRef) {
+  const f = findingFor(ref);
+  if (!f) return;
+  const prompt = assistantPrompt(f, hintCard(f).fix);
+  void coachEvent(f, 4, "fix_with_assistant", ref.uri);
+  for (const cmd of ["workbench.action.chat.open", "aichat.newchataction"]) {
+    try {
+      await vscode.commands.executeCommand(cmd, { query: prompt });
+      return;
+    } catch {
+      /* no such assistant */
+    }
+  }
+  await vscode.env.clipboard.writeText(prompt);
+  vscode.window.showInformationMessage("Copal: no AI chat found here, so the request is in your clipboard. Paste it into your assistant.");
+}
+
+/** "Not relevant": suppresses this occurrence with a comment the team can see, and records it for "rules to tune". */
+async function notRelevant(ref: FindingRef) {
+  const f = findingFor(ref);
+  if (!f) return;
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(ref.uri));
+  const lineText = doc.lineAt(f.line - 1).text;
+  const indent = lineText.slice(0, lineText.length - lineText.trimStart().length);
+  const comment = /\.(py|ya?ml|sh)$/.test(doc.fileName) ? "#" : "//";
+  const edit = new vscode.WorkspaceEdit();
+  edit.insert(doc.uri, new vscode.Position(f.line - 1, 0), `${indent}${comment} copal-ignore ${f.ruleId}\n`);
+  await vscode.workspace.applyEdit(edit);
+  void coachEvent(f, 0, "false_positive", ref.uri);
 }
 
 // ---------------------------------------------------------------- review my change
@@ -397,16 +509,11 @@ class QuickFixes implements vscode.CodeActionProvider {
       if (!f) continue;
       const ref: FindingRef = { uri: doc.uri.toString(), ruleId: f.ruleId, line: f.line };
       const coached = !!f.coach;
-      if (f.coach?.question) {
-        const a = new vscode.CodeAction(`Copal: Ask me (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
-        a.command = { title: "Ask me", command: "copal.ask", arguments: [ref] };
+      if (policyOf.get(doc.uri.toString())?.rules.find((r) => r.id === f.ruleId)?.requireTest) {
+        const a = new vscode.CodeAction("Copal: Create the test", vscode.CodeActionKind.QuickFix);
+        a.command = { title: "Create the test", command: "copal.createTest", arguments: [ref] };
         a.diagnostics = [d];
-        actions.push(a);
-      }
-      if (coached) {
-        const a = new vscode.CodeAction(`Copal: Explain (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
-        a.command = { title: "Explain", command: "copal.explain", arguments: [ref] };
-        a.diagnostics = [d];
+        a.isPreferred = true;
         actions.push(a);
       }
       if (f.suggestion) {
@@ -424,7 +531,11 @@ class QuickFixes implements vscode.CodeActionProvider {
         a.diagnostics = [d];
         actions.push(a);
       }
-      const ignore = new vscode.CodeAction(`Copal: mark as false positive (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
+      const fx = new vscode.CodeAction("Copal: Fix with my assistant", vscode.CodeActionKind.QuickFix);
+      fx.command = { title: "Fix with my assistant", command: "copal.fixWithAssistant", arguments: [ref] };
+      fx.diagnostics = [d];
+      actions.push(fx);
+      const ignore = new vscode.CodeAction(`Copal: Not relevant here (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
       ignore.edit = new vscode.WorkspaceEdit();
       const lineText = doc.lineAt(f.line - 1).text;
       const indent = lineText.slice(0, lineText.length - lineText.trimStart().length);
@@ -471,6 +582,9 @@ export function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand("copal.ask", ask),
     vscode.commands.registerCommand("copal.explain", explain),
     vscode.commands.registerCommand("copal.showMe", showMe),
+    vscode.commands.registerCommand("copal.createTest", createTest),
+    vscode.commands.registerCommand("copal.fixWithAssistant", fixWithAssistant),
+    vscode.commands.registerCommand("copal.notRelevant", notRelevant),
     vscode.commands.registerCommand("copal.recordShowMe", (ref: FindingRef) => {
       const f = findingFor(ref);
       if (f) void coachEvent(f, 4, "show_me", ref.uri);

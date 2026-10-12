@@ -156,27 +156,54 @@ object CopalText {
 
     private val esc = { s: String -> s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") }
 
+    /** The test path a "no test changed" finding suggests ("… (for example src/a/b.test.ts)"), if any. */
+    fun testPathIn(message: String): String? = Regex("""for example ([^\s)]+)\)""").find(message)?.groupValues?.get(1)
+
+    /** A first test to fill in: the developer writes the example; Copal never invents the assertion. */
+    fun testSkeleton(testPath: String, sourcePath: String): String {
+        val name = sourcePath.substringAfterLast('/').substringBeforeLast('.')
+        return when {
+            Regex("""\.(ts|tsx|js|jsx|mjs)$""").containsMatchIn(testPath) ->
+                "describe(\"$name\", () => {\n  it(\"first example: given …, expect …\", () => {\n    // Write the business rule as an example, then make it pass.\n  });\n});\n"
+            testPath.endsWith(".py") -> "def test_first_example():\n    # Write the business rule as an example, then make it pass.\n    assert True\n"
+            testPath.endsWith(".java") || testPath.endsWith(".kt") ->
+                "// First example for $name: given …, expect …\n// Write the business rule as an example, then make it pass.\n"
+            else -> ""
+        }
+    }
+
+    /** The request handed to the developer's AI assistant: the finding, the team rule and its reason, the fix. */
+    fun assistantPrompt(f: Finding): String = listOfNotNull(
+        "Fix this in ${f.file} at line ${f.line}: ${f.message}.",
+        "It breaks our team rule \"${f.ruleId}\"" + (f.why?.let { ": $it" } ?: "."),
+        f.fix?.let { "The team's preferred fix: $it" },
+        "Keep the change small, follow the rule, and add or update a test that proves it.",
+    ).joinToString("\n")
+
     /** Annotation message: the question leads when the rule is coached. */
     fun message(f: Finding): String =
-        f.coach?.question?.let { "Copal [${f.ruleId}] ${f.message} — $it" } ?: "Copal [${f.ruleId}] ${f.message}"
+        f.coach?.question?.let { "$it (${f.message})" } ?: "${f.message}"
 
     /**
      * Hint card tooltip. Coached findings show level 0–1 (signal + question) and point to Alt+Enter for
      * Ask me · Explain · Show me; the fix is never displayed here. Uncoached findings keep the classic diff.
      */
     fun tooltipHtml(f: Finding): String {
-        val stance = if (f.blocking) "blocking" else if (f.coached) "coach" else "audit"
-        val sb = StringBuilder("<html><b>Copal</b> · <code>${esc(f.ruleId)}</code> · $stance<br/>${esc(f.message)}")
+        // The question once, one line of why, then what Alt+Enter offers. No repeated "Ask me / Explain".
         val q = f.coach?.question
-        if (q != null) {
-            sb.append("<br/><br/><b>${esc(q)}</b>")
-            sb.append("<br/><small>Alt+Enter → Ask me · Explain · Show me</small>")
-        } else {
-            f.why?.let { sb.append("<br/><i>${esc(it)}</i>") }
-            f.suggestion?.let { sb.append("<br/><code>- ${esc(it.original.trim())}</code><br/><code>+ ${esc(it.replacement.trim())}</code>") }
+        val sb = StringBuilder("<html><b>${esc(q ?: f.message)}</b>")
+        if (q != null) sb.append("<br/>${esc(f.message)}")
+        f.why?.let { sb.append(if (q != null) " · <i>${esc(it)}</i>" else "<br/><i>${esc(it)}</i>") }
+        if (q == null) f.suggestion?.let { sb.append("<br/><code>- ${esc(it.original.trim())}</code><br/><code>+ ${esc(it.replacement.trim())}</code>") }
+        val actions = buildList {
+            if (testPathIn(f.message) != null) add("Create the test")
+            if (f.fix != null) add("Show me")
+            add("Fix with my assistant")
+            add("Not relevant")
         }
+        sb.append("<br/><br/><small>Alt+Enter → ${actions.joinToString(" · ")}</small>")
         f.coach?.kata?.let { sb.append("<br/><small>Practice: ${esc(it)}</small>") }
-        f.sources?.takeIf { it.isNotEmpty() }?.let { sb.append("<br/><small>Sources: ${esc(it.joinToString(" · "))}</small>") }
+        sb.append("<br/><small>Copal · ${esc(f.ruleId)}</small>")
         return sb.append("</html>").toString()
     }
 

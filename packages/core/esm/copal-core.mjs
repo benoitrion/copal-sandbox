@@ -1454,7 +1454,7 @@ function checkRequireTest(rule, files) {
     const name = basename(file.path).replace(/\.[^.]+$/, "");
     const expected = rule.requireTest.test.replace(/\{dir\}/g, dir).replace(/\{name\}/g, name);
     if (!files.some((f) => matchGlob(f.path, expected))) {
-      out.push(base(rule, file.path, file.addedLines[0]?.line ?? 1, `Change has no accompanying test (expected ${expected})`, "testing", "warning"));
+      out.push(base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning"));
     }
   }
   return out;
@@ -1472,6 +1472,17 @@ function checkChangeSize(rule, files) {
   if (!over.length) return [];
   const first = files.find((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude));
   return [base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info")];
+}
+function concreteTestPath(expected, file) {
+  const i = expected.indexOf("**");
+  if (i < 0) return expected;
+  const prefix = expected.slice(0, i);
+  const dirSegs = dirname(file).split("/");
+  const preSegs = prefix.split("/").filter(Boolean);
+  let at = -1;
+  for (let k = preSegs.length - 1; k >= 0 && at < 0; k--) at = dirSegs.lastIndexOf(preSegs[k]);
+  const rest = (at >= 0 ? dirSegs.slice(at + 1) : dirSegs.slice(1)).join("/");
+  return (prefix + rest + "/" + expected.slice(i + 2).replace(/^\/+/, "")).replace(/\/+/g, "/");
 }
 function redact(text, policy) {
   const counts = /* @__PURE__ */ new Map();
@@ -2227,6 +2238,7 @@ export {
   briefToText,
   buildBrief,
   changeSizeOf,
+  concreteTestPath,
   containsCode,
   cyan,
   detectSmell,

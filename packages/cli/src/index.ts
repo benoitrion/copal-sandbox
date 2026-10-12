@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow, weeklyReport, weeklyReportToMarkdown, practice, PullRecord, DeploymentRecord, IncidentRecord } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow, weeklyReport, weeklyReportToMarkdown, changedLineSet, onChangedLines, practice, PullRecord, DeploymentRecord, IncidentRecord } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges, branchCommits } from "./git";
 
@@ -11,7 +11,7 @@ Usage:
   copal login [--server URL] [--key KEY] [--create-key]   Save server URL + device key (~/.copal/config.json)
   copal status                                            Workspace state from the Copal server
   copal check [--staged|--base REF|--all|--diff FILE]     Validate changes against .copalrules
-  copal check --stdin-file PATH --json                    Check unsaved editor content (stdin) as PATH
+  copal check --stdin-file PATH --json [--all-lines]      Check unsaved editor content (stdin) as PATH; changed lines only unless --all-lines
              [--env ENV] [--json] [--show-me] [--fix] [--audit] [--local]
              Hints lead with a question; --show-me reveals fixes, --fix applies pattern fixes (both recorded)
   copal reflect "TASK" [--json] [--skip]                  Navigator: answer up to 3 questions before an AI builds TASK
@@ -170,7 +170,16 @@ async function checkStdinFile(file: string, flags: Flags): Promise<number> {
   const rel = path.relative(repo.root, abs).split(path.sep).join("/");
   const content = fs.readFileSync(0, "utf8");
   const environment = String(flags.env ?? process.env.COPAL_ENV ?? "local");
-  const report = evaluate([fileAsChange(rel, content)], repo.policy, { environment });
+  // Other files changed in the working tree count (a test next to the code), without their contents.
+  const changedPaths = (args: string[]) => { try { return git(args, repo.root).split("\n").map((x) => x.trim()).filter(Boolean); } catch { return []; } };
+  const others = [...changedPaths(["diff", "--name-only", "HEAD"]), ...changedPaths(["ls-files", "--others", "--exclude-standard"])]
+    .filter((p) => p !== rel).map((p) => ({ path: p, status: "modified" as const, addedLines: [] }));
+  const full = evaluate([fileAsChange(rel, content), ...others], repo.policy, { environment });
+  // IDE default: hints only on lines changed since the last commit (--all-lines for the whole file).
+  let head: string | undefined;
+  try { head = flags["all-lines"] ? undefined : git(["show", `HEAD:${rel}`], repo.root); } catch { head = undefined; }
+  const findings = flags["all-lines"] ? full.findings.filter((f) => f.file === rel) : onChangedLines(full.findings, repo.policy, rel, changedLineSet(head, content));
+  const report = { ...full, findings, blocking: findings.some((f) => f.blocking), summary: { ...full.summary, total: findings.length, blocking: findings.filter((f) => f.blocking).length, audit: findings.filter((f) => !f.blocking).length } };
   if (flags.json) console.log(JSON.stringify({ ...report, project: repo.project, file: rel, mode: "local" }));
   else console.log(formatReport(report));
   return report.blocking && !flags.audit ? 1 : 0;

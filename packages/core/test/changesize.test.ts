@@ -27,3 +27,10 @@ test("change-size: validation", () => {
   assert.deepEqual(validatePolicy(policy), []);
   assert.equal(validatePolicy({ version: 4, rules: [{ id: "x", changeSize: { maxLines: 0 } }] }).length, 1);
 });
+
+test("concrete test path from a glob template", async () => {
+  const { concreteTestPath } = await import("../src/engine.js").catch(() => require("../src/engine"));
+  assert.equal(concreteTestPath("src/**/reminders.test.ts", "src/payments/reminders.ts"), "src/payments/reminders.test.ts");
+  assert.equal(concreteTestPath("src/test/java/**/FooTest.java", "src/main/java/com/x/Foo.java"), "src/test/java/com/x/FooTest.java");
+  assert.equal(concreteTestPath("tests/test_a.py", "src/a.py"), "tests/test_a.py");
+});

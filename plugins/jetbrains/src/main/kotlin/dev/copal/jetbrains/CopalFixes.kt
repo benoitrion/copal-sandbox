@@ -145,7 +145,7 @@ class ApplySuggestionFix(private val finding: Finding) : IntentionAction, Priori
 
 /** Inserts `// copal-ignore <rule>` above the line; the next check (and the PR check) suppresses the finding. */
 class MarkFalsePositiveFix(private val finding: Finding) : IntentionAction {
-    override fun getText() = "Copal: mark as false positive (${finding.ruleId})"
+    override fun getText() = "Copal: Not relevant here (${finding.ruleId})"
     override fun getFamilyName() = "Copal"
     override fun startInWriteAction() = true
 
@@ -160,5 +160,41 @@ class MarkFalsePositiveFix(private val finding: Finding) : IntentionAction {
         doc.insertString(doc.getLineStartOffset(line), CopalText.ignoreLine(indent, prefix, finding.ruleId))
         // feeds the "noisy rule" signal on the lead's dashboard
         recordEvent(workDirOf(file), finding, 0, "false_positive")
+    }
+}
+
+/** "Create the test": opens the test the rule expects, creating it with a first example to fill in when missing. */
+class CreateTestFix(private val finding: Finding) : IntentionAction, PriorityAction {
+    override fun getText() = "Copal: Create the test"
+    override fun getFamilyName() = "Copal coach"
+    override fun getPriority() = PriorityAction.Priority.TOP
+    override fun startInWriteAction() = false
+    override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?) = CopalText.testPathIn(finding.message) != null && workDirOf(file) != null
+
+    override fun invoke(project: Project, editor: Editor?, file: PsiFile?) {
+        val rel = CopalText.testPathIn(finding.message) ?: return
+        val root = workDirOf(file) ?: return
+        val target = File(root, rel)
+        if (!target.exists()) {
+            target.parentFile?.mkdirs()
+            target.writeText(CopalText.testSkeleton(rel, finding.file))
+        }
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(target) ?: return
+        OpenFileDescriptor(project, vf).navigate(true)
+        recordEvent(root, finding, 4, "create_test")
+    }
+}
+
+/** "Fix with my assistant": puts a ready request in the clipboard for the developer's AI chat (AI Assistant, Copilot, Junie). */
+class FixWithAssistantFix(private val finding: Finding) : IntentionAction {
+    override fun getText() = "Copal: Fix with my assistant"
+    override fun getFamilyName() = "Copal coach"
+    override fun startInWriteAction() = false
+    override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?) = true
+
+    override fun invoke(project: Project, editor: Editor?, file: PsiFile?) {
+        com.intellij.openapi.ide.CopyPasteManager.getInstance().setContents(java.awt.datatransfer.StringSelection(CopalText.assistantPrompt(finding)))
+        CopalNotifier.notify(project, "Copal: the request is in your clipboard. Paste it into your AI assistant's chat.")
+        recordEvent(workDirOf(file), finding, 4, "fix_with_assistant")
     }
 }

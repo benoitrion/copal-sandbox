@@ -246,6 +246,11 @@ export declare function changeSizeOf(rule: Rule, files: FileChange[]): {
     lines: number;
     files: number;
 };
+/**
+ * A concrete test path from a glob template, for messages and "Create the test":
+ * "src/**\/reminders.test.ts" for src/payments/reminders.ts → "src/payments/reminders.test.ts".
+ */
+export declare function concreteTestPath(expected: string, file: string): string;
 export interface RedactionResult {
     text: string;
     redactions: {
