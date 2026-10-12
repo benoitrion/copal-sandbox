@@ -1,0 +1,21 @@
+name: Copal self-test
+on:
+  workflow_dispatch:
+    inputs:
+      mode: { description: "weekly or readiness", default: readiness }
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  statuses: write
+jobs:
+  copal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./actions/program
+        with:
+          mode: ${{ inputs.mode }}
+          days: "90"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
