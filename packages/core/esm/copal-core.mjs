@@ -1880,17 +1880,25 @@ function weeklyReport(input) {
     return ((next ? Date.parse(next.at) : merged) - start) / H;
   });
   const delivery = [
-    { name: "Lead time for changes", value: median(lead), unit: "hours (median)", note: deploys.length ? "First commit to deployment" : "First commit to merge: no deployment data, so time to production is not included" }
+    { name: "Change lead time", value: median(lead), unit: "hours (median)", note: deploys.length ? "First commit to deployment" : "First commit to merge: no deployment data, so time to production is not included" }
   ];
   if (deploys.length) {
     delivery.push({ name: "Deployment frequency", value: deploys.length / days, unit: "per day" });
-    delivery.push({ name: "Change failure rate", value: deploys.filter((d) => d.failed).length / deploys.length, unit: "share of deployments" });
+    delivery.push({ name: "Change fail rate", value: deploys.filter((d) => d.failed).length / deploys.length, unit: "share of deployments" });
   } else {
     delivery.push({ name: "Deployment frequency", value: null, unit: "per day", note: "Not measured: publish deployments or releases to include it" });
-    delivery.push({ name: "Change failure rate", value: null, unit: "share of deployments", note: "Not measured: needs deployment data" });
+    delivery.push({ name: "Change fail rate", value: null, unit: "share of deployments", note: "Not measured: needs deployment data" });
   }
-  const restored = (input.incidents ?? []).filter((i) => i.resolvedAt && inWindow(i.resolvedAt));
-  delivery.push(restored.length ? { name: "Time to restore service", value: median(restored.map((i) => (Date.parse(i.resolvedAt) - Date.parse(i.openedAt)) / H)), unit: "hours (median)" } : { name: "Time to restore service", value: null, unit: "hours (median)", note: input.incidents ? "No incident resolved this week" : "Not measured: label incidents to include it" });
+  const recovery = [];
+  deploys.forEach((d, k) => {
+    if (!d.failed || k > 0 && deploys[k - 1].failed) return;
+    const ok = deploys.slice(k + 1).find((x) => !x.failed);
+    if (ok) recovery.push((Date.parse(ok.at) - Date.parse(d.at)) / H);
+  });
+  delivery.splice(2, 0, deploys.length ? { name: "Failed deployment recovery time", value: median(recovery), unit: "hours (median)", note: recovery.length ? void 0 : "No failed deployment this week" } : { name: "Failed deployment recovery time", value: null, unit: "hours (median)", note: "Not measured: needs deployment data" });
+  const incidents = input.incidents ?? [];
+  const unplanned = (d) => d.unplanned ?? incidents.some((i) => Date.parse(d.at) >= Date.parse(i.openedAt) && (!i.resolvedAt || Date.parse(d.at) <= Date.parse(i.resolvedAt)));
+  delivery.push(deploys.length && (input.incidents || deploys.some((d) => d.unplanned !== void 0)) ? { name: "Deployment rework rate", value: deploys.filter(unplanned).length / deploys.length, unit: "share of deployments" } : { name: "Deployment rework rate", value: null, unit: "share of deployments", note: "Not measured: needs deployments and labelled incidents" });
   const rank = { "needs practice": 0, fair: 1, strong: 2, unknown: 3 };
   const pick = [...disciplines].sort((a, b) => rank[a.status] - rank[b.status] || Number(b.trend === "worse") - Number(a.trend === "worse"))[0];
   const focus = pick && pick.status !== "strong" && pick.status !== "unknown" ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status).id } : null;
@@ -1913,7 +1921,7 @@ function weeklyReportToMarkdown(r, practiceTitle) {
   }
   out.push("### Delivery", "", "| Metric | Value | Note |", "|---|---|---|");
   for (const d of r.delivery) out.push(`| ${d.name} | ${d.value == null ? "\u2014" : d.unit.startsWith("share") ? `${Math.round(d.value * 100)}%` : `${Math.round(d.value * 100) / 100} ${d.unit}`} | ${d.note ?? ""} |`);
-  out.push("", "_Delivery metrics follow DORA's definitions where the data allows._");
+  out.push("", "_Delivery metrics follow DORA's five software delivery metrics where the data allows: trends to discuss, not targets._");
   return out.join("\n");
 }
 

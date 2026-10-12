@@ -35,9 +35,14 @@ test("weekly: delivery metrics only when data allows", () => {
   assert.match(without.delivery[1].note!, /Not measured/);
   const withDeploys = weeklyReport({ pulls: [pr(1, 100, true, 2)], deployments: [{ at: at(2) }, { at: at(1), failed: true }], incidents: [{ openedAt: at(3), resolvedAt: at(1) }], now });
   assert.equal(withDeploys.delivery[0].value, 38);
-  assert.equal(withDeploys.delivery[2].value, 0.5);
-  assert.equal(withDeploys.delivery[3].value, 2);
-  assert.match(weeklyReportToMarkdown(withDeploys), /Change failure rate \| 50%/);
+  assert.deepEqual(withDeploys.delivery.map((d) => d.name), ["Change lead time", "Deployment frequency", "Failed deployment recovery time", "Change fail rate", "Deployment rework rate"]);
+  assert.equal(withDeploys.delivery[3].value, 0.5);
+  assert.equal(withDeploys.delivery[2].value, null);
+  assert.equal(withDeploys.delivery[4].value, 1);
+  assert.match(weeklyReportToMarkdown(withDeploys), /Change fail rate \| 50%/);
+  const recovered = weeklyReport({ pulls: [pr(1, 100, true, 2)], deployments: [{ at: at(5), failed: true }, { at: at(2) }], now });
+  assert.equal(recovered.delivery[2].value, 3);
+  assert.equal(recovered.delivery[4].value, null);
 });
 
 test("ladder: three rungs per discipline, start and next", () => {

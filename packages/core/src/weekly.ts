@@ -22,8 +22,10 @@ export interface PullRecord {
 
 export interface DeploymentRecord {
   at: string;
-  /** Deployment failed or caused a rollback / hotfix. */
+  /** Deployment failed or needed immediate intervention (rollback, hotfix). */
   failed?: boolean;
+  /** Unplanned deployment made because of a production incident. */
+  unplanned?: boolean;
 }
 
 export interface IncidentRecord {
@@ -158,7 +160,7 @@ export function weeklyReport(input: {
     { id: "review", name: "Review flow", metric: "Hours to first review (median)", value: m.medianFirstReviewH, previous: p?.medianFirstReviewH ?? null, trend: trend(m.medianFirstReviewH, p?.medianFirstReviewH ?? null, false, 2), status: review as Level },
   ];
 
-  // Delivery (DORA definitions, https://dora.dev/guides/dora-metrics-four-keys/)
+  // Delivery (DORA's five software delivery metrics, https://dora.dev/guides/dora-metrics/)
   const deploys = (input.deployments ?? []).filter((d) => inWindow(d.at)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const lead = pulls.map((pr) => {
     const start = Date.parse(pr.firstCommitAt ?? pr.createdAt);
@@ -167,19 +169,31 @@ export function weeklyReport(input: {
     return ((next ? Date.parse(next.at) : merged) - start) / H;
   });
   const delivery: DeliveryMetric[] = [
-    { name: "Lead time for changes", value: median(lead), unit: "hours (median)", note: deploys.length ? "First commit to deployment" : "First commit to merge: no deployment data, so time to production is not included" },
+    { name: "Change lead time", value: median(lead), unit: "hours (median)", note: deploys.length ? "First commit to deployment" : "First commit to merge: no deployment data, so time to production is not included" },
   ];
   if (deploys.length) {
     delivery.push({ name: "Deployment frequency", value: deploys.length / days, unit: "per day" });
-    delivery.push({ name: "Change failure rate", value: deploys.filter((d) => d.failed).length / deploys.length, unit: "share of deployments" });
+    delivery.push({ name: "Change fail rate", value: deploys.filter((d) => d.failed).length / deploys.length, unit: "share of deployments" });
   } else {
     delivery.push({ name: "Deployment frequency", value: null, unit: "per day", note: "Not measured: publish deployments or releases to include it" });
-    delivery.push({ name: "Change failure rate", value: null, unit: "share of deployments", note: "Not measured: needs deployment data" });
+    delivery.push({ name: "Change fail rate", value: null, unit: "share of deployments", note: "Not measured: needs deployment data" });
   }
-  const restored = (input.incidents ?? []).filter((i) => i.resolvedAt && inWindow(i.resolvedAt));
-  delivery.push(restored.length
-    ? { name: "Time to restore service", value: median(restored.map((i) => (Date.parse(i.resolvedAt!) - Date.parse(i.openedAt)) / H)), unit: "hours (median)" }
-    : { name: "Time to restore service", value: null, unit: "hours (median)", note: input.incidents ? "No incident resolved this week" : "Not measured: label incidents to include it" });
+  // Failed deployment recovery time: a failed deployment to the next successful one.
+  const recovery: number[] = [];
+  deploys.forEach((d, k) => {
+    if (!d.failed || (k > 0 && deploys[k - 1].failed)) return;
+    const ok = deploys.slice(k + 1).find((x) => !x.failed);
+    if (ok) recovery.push((Date.parse(ok.at) - Date.parse(d.at)) / H);
+  });
+  delivery.splice(2, 0, deploys.length
+    ? { name: "Failed deployment recovery time", value: median(recovery), unit: "hours (median)", note: recovery.length ? undefined : "No failed deployment this week" }
+    : { name: "Failed deployment recovery time", value: null, unit: "hours (median)", note: "Not measured: needs deployment data" });
+  // Deployment rework rate: unplanned deployments caused by a production incident.
+  const incidents = input.incidents ?? [];
+  const unplanned = (d: DeploymentRecord) => d.unplanned ?? incidents.some((i) => Date.parse(d.at) >= Date.parse(i.openedAt) && (!i.resolvedAt || Date.parse(d.at) <= Date.parse(i.resolvedAt)));
+  delivery.push(deploys.length && (input.incidents || deploys.some((d) => d.unplanned !== undefined))
+    ? { name: "Deployment rework rate", value: deploys.filter(unplanned).length / deploys.length, unit: "share of deployments" }
+    : { name: "Deployment rework rate", value: null, unit: "share of deployments", note: "Not measured: needs deployments and labelled incidents" });
 
   // Focus: the weakest discipline, a worsening one first among equals
   const rank: Record<Level, number> = { "needs practice": 0, fair: 1, strong: 2, unknown: 3 };
@@ -209,6 +223,6 @@ export function weeklyReportToMarkdown(r: WeeklyReport, practiceTitle?: (id: str
   }
   out.push("### Delivery", "", "| Metric | Value | Note |", "|---|---|---|");
   for (const d of r.delivery) out.push(`| ${d.name} | ${d.value == null ? "—" : d.unit.startsWith("share") ? `${Math.round(d.value * 100)}%` : `${Math.round(d.value * 100) / 100} ${d.unit}`} | ${d.note ?? ""} |`);
-  out.push("", "_Delivery metrics follow DORA's definitions where the data allows._");
+  out.push("", "_Delivery metrics follow DORA's five software delivery metrics where the data allows: trends to discuss, not targets._");
   return out.join("\n");
 }
