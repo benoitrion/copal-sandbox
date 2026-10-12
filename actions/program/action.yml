@@ -24,7 +24,7 @@ runs:
       working-directory: ${{ github.action_path }}/../..
       run: |
         log="$(mktemp)"
-        if ! { npm ci --no-audit --no-fund --loglevel=error && npm run build --silent; } >"$log" 2>&1; then
+        if ! { npm install --no-audit --no-fund --loglevel=error && npx tsc -b packages/core packages/client packages/cli packages/git-app; } >"$log" 2>&1; then
           cat "$log"; echo "::error title=Copal build failed::$(tail -c 1500 "$log" | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; exit 1
         fi
     - name: Run
