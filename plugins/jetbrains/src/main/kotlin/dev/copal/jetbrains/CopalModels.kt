@@ -36,6 +36,10 @@ data class Finding(
     val fixText: String? = null,
     val sources: List<String>? = null,
     val coach: Coach? = null,
+    /** high · medium · low */
+    val risk: String? = null,
+    /** Security, Error prone, Complexity, Duplication, Tests, Architecture, Dependencies, Best practice */
+    val kind: String? = null,
 ) {
     /** Level-4 content ("Show me"): the concrete replacement, or the fix described in words. */
     val fix: String? get() = suggestion?.replacement?.trim() ?: fixText
@@ -203,7 +207,8 @@ object CopalText {
         }
         sb.append("<br/><br/><small>Alt+Enter → ${actions.joinToString(" · ")}</small>")
         f.coach?.kata?.let { sb.append("<br/><small>Practice: ${esc(it)}</small>") }
-        sb.append("<br/><small>Copal · ${esc(f.ruleId)}</small>")
+        val risk = if (f.blocking) "Blocking" else f.risk?.replaceFirstChar { it.uppercase() }?.plus(" risk")
+        sb.append("<br/><small>${esc(listOfNotNull(risk, f.kind, "Copal · ${f.ruleId}").joinToString(" · "))}</small>")
         return sb.append("</html>").toString()
     }
 

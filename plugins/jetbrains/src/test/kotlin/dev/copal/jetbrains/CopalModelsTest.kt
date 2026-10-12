@@ -164,4 +164,10 @@ class CopalModelsTest {
         assertEquals(null, CopalText.testPathIn("Inline rounding bypasses LedgerPort"))
         assertTrue(CopalText.testSkeleton("src/a/b.test.ts", "src/a/b.ts").contains("first example"))
     }
+
+    @Test
+    fun `risk and family appear in the tooltip`() {
+        val r = CopalJson.parseReport("""{"findings":[{"ruleId":"complexity","severity":"warning","mode":"audit","blocking":false,"file":"a.ts","line":2,"message":"Function f has 13 decision paths","risk":"medium","kind":"Complexity"}],"blocking":false,"summary":{"total":1,"blocking":0,"audit":1}}""")!!
+        assertTrue(CopalText.tooltipHtml(r.findings[0]).contains("Medium risk · Complexity"))
+    }
 }
