@@ -95,17 +95,34 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
  * Markdown body for one inline review comment — a hint card: question first, explanation folded,
  * fix ("Show me") folded and never as a one-click suggestion when the rule has coaching.
  */
+const KIND_ICON: Record<string, string> = { Security: "🔒", Architecture: "🏛️", Dependencies: "📦", Tests: "🧪", Complexity: "🌀", Duplication: "📑", "Error prone": "🐞", "Best practice": "✨", "Change size": "📏" };
+
+/** Marker so the bot recognises its own inline comments (never repeat one) without parsing the prose. */
+export const commentMarker = (ruleId: string) => `<!-- copal:${ruleId} -->`;
+
+/**
+ * One inline review comment, like a good reviewer's: a label with the risk, one specific paragraph (what this code
+ * does, why it matters), the change to commit when there is one, and a one-line footer for feedback.
+ */
 export function findingToMarkdown(f: Finding, opts: { referenceBase?: string } = {}): string {
-  // Same shape as the editor hint: the question, one line of signal and why, the fix folded, a small footer.
   const card = hintCard(f);
   const risk = f.blocking ? "⛔ Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
-  const out = [`**${card.question ?? card.signal}**`, "", card.question ? `${card.signal}${f.why ? ` · _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
-  if (f.suggestion && !f.coach) out.push("", "```suggestion", f.suggestion.replacement, "```");
-  else if (card.fix) out.push("", `<details><summary>Show me</summary>\n\n\`\`\`\n${card.fix}\n\`\`\`\n\n</details>`);
+  const label = [f.kind ? `${KIND_ICON[f.kind] ?? "💬"} **${f.kind}**` : "💬 **Copal**", risk].filter(Boolean).join(" · ");
+  const sentence = (t: string) => t.replace(/\s+$/, "").replace(/([^.?!:])$/, "$1.");
+  const fixLine = card.fix && !card.fix.includes("\n") && !f.suggestion ? ` ${sentence(card.fix)}` : "";
+  const body = card.question
+    ? `**${card.question}** ${sentence(card.signal)}${f.why ? ` ${sentence(f.why)}` : ""}`
+    : `${sentence(card.signal)}${fixLine || (f.why ? ` ${sentence(f.why)}` : "")}`;
+  const out = [label, "", body];
+  if (f.suggestion) out.push("", "```suggestion", f.suggestion.replacement, "```");
+  else if (card.fix && card.fix.includes("\n")) {
+    const title = f.kind === "Tests" ? "Suggested test" : f.kind === "Change size" ? "Suggested split" : "Suggested change";
+    out.push("", `<details><summary>${title}</summary>\n\n\`\`\`${f.kind === "Tests" ? "ts" : ""}\n${card.fix}\n\`\`\`\n\n</details>`);
+  }
   const ref = card.reference ? ` · ${referenceLink(card.reference, opts.referenceBase)}` : "";
   const kata = card.kata ? ` · [practice](${card.kata})` : "";
-  out.push("", `<sub>${[risk, f.kind, `Copal · \`${f.ruleId}\``].filter(Boolean).join(" · ")}${ref}${kata}</sub>`);
-  return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
+  out.push("", `<sub>Spotted by **Copal** · \`${f.ruleId}\`${ref}${kata} · Is this helpful? React 👍 or 👎</sub>`, commentMarker(f.ruleId));
+  return out.join("\n");
 }
 
 /** A repo-relative reference becomes a link to that file at the reviewed commit; URLs stay links. */

@@ -48,3 +48,25 @@ export function testDetail(fileName: string, content?: string): string | undefin
   if (fns.length === 1) return `\`${fns[0].name}\` has ${cases(fns[0].branches)} and no test`;
   return `${fns.length} functions in ${fileName} and no test; start with \`${top[0].name}\` (${cases(top[0].branches)})`;
 }
+
+/** A first test file for the untested functions: one example per function to fill in, cases listed. */
+export function testSkeletonFor(sourcePath: string, testPath: string, content?: string): string | undefined {
+  if (!content) return undefined;
+  const fns = exportedFunctions(content).slice(0, 3);
+  if (!fns.length) return undefined;
+  const rel = (() => {
+    const from = testPath.split("/").slice(0, -1);
+    const to = sourcePath.replace(/\.[jt]sx?$/, "").split("/");
+    let i = 0;
+    while (i < from.length && from[i] === to[i]) i++;
+    const up = from.length - i;
+    return (up ? "../".repeat(up) : "./") + to.slice(i).join("/");
+  })();
+  const lines = [`import { ${fns.map((f) => f.name).join(", ")} } from "${rel}";`, ""];
+  for (const f of fns) {
+    lines.push(`describe("${f.name}", () => {`, `  it("<first example: input → expected result>", () => {`, `    expect(${f.name}(/* input */)).toEqual(/* expected */);`, "  });");
+    if (f.branches) lines.push(`  // ${f.branches} more case${f.branches > 1 ? "s" : ""} to pin down: one example each`);
+    lines.push("});", "");
+  }
+  return lines.join("\n").trimEnd();
+}

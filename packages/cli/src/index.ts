@@ -592,7 +592,12 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
       try {
         // Conversation replies, and replies in an inline thread (which carry the file).
         const cs: any[] = await get(`/repos/${repo}/${kind}/${p.number}/comments?per_page=100`);
-        for (const c of cs) for (const m of String(c.body ?? "").matchAll(/^\/copal\s+(?:false-positive|fp)\s+([\w-]+)/gm)) dismissals.push({ ruleId: m[1], at: c.created_at, file: c.path });
+        for (const c of cs) {
+          for (const m of String(c.body ?? "").matchAll(/^\/copal\s+(?:false-positive|fp)\s+([\w-]+)/gm)) dismissals.push({ ruleId: m[1], at: c.created_at, file: c.path });
+          // 👎 on a Copal comment counts as a dismissal of its rule.
+          const own = /<!-- copal:([\w/-]+) -->/.exec(String(c.body ?? ""));
+          for (let i = 0; own && i < (c.reactions?.["-1"] ?? 0); i++) dismissals.push({ ruleId: own[1], at: c.created_at, file: c.path });
+        }
       } catch { /* comments unavailable */ }
     }
   }

@@ -329,9 +329,11 @@ export declare function formatReport(r: Report, opts?: FormatOptions): string;
 /** Findings grouped by rule and file, in report order; blocking findings keep their own group. */
 export declare function groupFindings(findings: Finding[]): Finding[][];
 export declare function reportToMarkdown(r: Report, title?: string): string;
+/** Marker so the bot recognises its own inline comments (never repeat one) without parsing the prose. */
+export declare const commentMarker: (ruleId: string) => string;
 /**
- * Markdown body for one inline review comment — a hint card: question first, explanation folded,
- * fix ("Show me") folded and never as a one-click suggestion when the rule has coaching.
+ * One inline review comment, like a good reviewer's: a label with the risk, one specific paragraph (what this code
+ * does, why it matters), the change to commit when there is one, and a one-line footer for feedback.
  */
 export declare function findingToMarkdown(f: Finding, opts?: {
     referenceBase?: string;

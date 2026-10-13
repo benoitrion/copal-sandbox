@@ -1,4 +1,4 @@
-import { anyDetail, testDetail } from "./detail";
+import { anyDetail, testDetail, testSkeletonFor } from "./detail";
 import { splitPlan, splitPlanText } from "./split";
 import * as posix from "./posix";
 import { inScope, matchGlob, normalizePath } from "./glob";
@@ -160,6 +160,7 @@ function checkPattern(rule: Rule, file: FileChange): Finding[] {
       if (d) Object.assign(f, { detail: d.detail }, d.fix && !f.fixText ? { fixText: d.fix } : {});
     }
     if (rule.fix && typeof rule.fix === "object") {
+      if (!f.detail) f.detail = `${f.message}: \`${m[0].trim()}\``;
       const fixRx = new RegExp(rule.fix.replace ?? rule.pattern!, flags);
       const replacement = text.replace(fixRx, rule.fix.with);
       if (replacement !== text) f.suggestion = { original: text, replacement };
@@ -256,7 +257,9 @@ function checkRequireTest(rule: Rule, files: FileChange[]): Finding[] {
     if (!files.some((f) => matchGlob(f.path, expected))) {
       const f = base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${posix.basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning");
       const d = testDetail(posix.basename(file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
-      if (d) f.detail = `${d}: ${concreteTestPath(expected, file.path)}`;
+      if (d) f.detail = `${d}; add \`${concreteTestPath(expected, file.path)}\``;
+      const skeleton = testSkeletonFor(file.path, concreteTestPath(expected, file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
+      if (skeleton && !f.fixText) f.fixText = skeleton;
       out.push(f);
     }
   }

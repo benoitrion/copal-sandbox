@@ -124,7 +124,7 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       }
       // Never repeat an inline comment already on this change (same rule, same file).
       for (const c of previous.inline) {
-        const m = /`([\w-]+)`/.exec(c.body);
+        const m = /<!-- copal:([\w/-]+) -->/.exec(c.body) ?? /`([\w-]+)`/.exec(c.body);
         if (m) seen.add(`${m[1]}:${c.path}`);
       }
       const inline = result.findings.filter((f) => (f.blocking || f.risk === "high" || f.risk === "medium") && inDiff.has(`${f.file}:${f.line}`) && !seen.has(`${f.ruleId}:${f.file}`) && !!seen.add(`${f.ruleId}:${f.file}`));

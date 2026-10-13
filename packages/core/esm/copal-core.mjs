@@ -1117,6 +1117,26 @@ function testDetail(fileName, content) {
   if (fns.length === 1) return `\`${fns[0].name}\` has ${cases(fns[0].branches)} and no test`;
   return `${fns.length} functions in ${fileName} and no test; start with \`${top[0].name}\` (${cases(top[0].branches)})`;
 }
+function testSkeletonFor(sourcePath, testPath, content) {
+  if (!content) return void 0;
+  const fns = exportedFunctions(content).slice(0, 3);
+  if (!fns.length) return void 0;
+  const rel = (() => {
+    const from = testPath.split("/").slice(0, -1);
+    const to = sourcePath.replace(/\.[jt]sx?$/, "").split("/");
+    let i = 0;
+    while (i < from.length && from[i] === to[i]) i++;
+    const up = from.length - i;
+    return (up ? "../".repeat(up) : "./") + to.slice(i).join("/");
+  })();
+  const lines = [`import { ${fns.map((f) => f.name).join(", ")} } from "${rel}";`, ""];
+  for (const f of fns) {
+    lines.push(`describe("${f.name}", () => {`, `  it("<first example: input \u2192 expected result>", () => {`, `    expect(${f.name}(/* input */)).toEqual(/* expected */);`, "  });");
+    if (f.branches) lines.push(`  // ${f.branches} more case${f.branches > 1 ? "s" : ""} to pin down: one example each`);
+    lines.push("});", "");
+  }
+  return lines.join("\n").trimEnd();
+}
 
 // src/split.ts
 var LAYERS = [
@@ -1608,6 +1628,7 @@ function checkPattern(rule, file) {
       if (d) Object.assign(f, { detail: d.detail }, d.fix && !f.fixText ? { fixText: d.fix } : {});
     }
     if (rule.fix && typeof rule.fix === "object") {
+      if (!f.detail) f.detail = `${f.message}: \`${m[0].trim()}\``;
       const fixRx = new RegExp(rule.fix.replace ?? rule.pattern, flags);
       const replacement = text.replace(fixRx, rule.fix.with);
       if (replacement !== text) f.suggestion = { original: text, replacement };
@@ -1691,7 +1712,9 @@ function checkRequireTest(rule, files) {
     if (!files.some((f) => matchGlob(f.path, expected))) {
       const f = base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning");
       const d = testDetail(basename(file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
-      if (d) f.detail = `${d}: ${concreteTestPath(expected, file.path)}`;
+      if (d) f.detail = `${d}; add \`${concreteTestPath(expected, file.path)}\``;
+      const skeleton = testSkeletonFor(file.path, concreteTestPath(expected, file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
+      if (skeleton && !f.fixText) f.fixText = skeleton;
       out.push(f);
     }
   }
@@ -1866,22 +1889,31 @@ function reportToMarkdown(r, title = "Copal check") {
   out.push("", "<sub>Not relevant? Reply `/copal false-positive <rule-id>`.</sub>");
   return out.join("\n");
 }
+var KIND_ICON = { Security: "\u{1F512}", Architecture: "\u{1F3DB}\uFE0F", Dependencies: "\u{1F4E6}", Tests: "\u{1F9EA}", Complexity: "\u{1F300}", Duplication: "\u{1F4D1}", "Error prone": "\u{1F41E}", "Best practice": "\u2728", "Change size": "\u{1F4CF}" };
+var commentMarker = (ruleId) => `<!-- copal:${ruleId} -->`;
 function findingToMarkdown(f, opts = {}) {
   const card = hintCard(f);
   const risk = f.blocking ? "\u26D4 Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
-  const out = [`**${card.question ?? card.signal}**`, "", card.question ? `${card.signal}${f.why ? ` \xB7 _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
-  if (f.suggestion && !f.coach) out.push("", "```suggestion", f.suggestion.replacement, "```");
-  else if (card.fix) out.push("", `<details><summary>Show me</summary>
+  const label = [f.kind ? `${KIND_ICON[f.kind] ?? "\u{1F4AC}"} **${f.kind}**` : "\u{1F4AC} **Copal**", risk].filter(Boolean).join(" \xB7 ");
+  const sentence = (t) => t.replace(/\s+$/, "").replace(/([^.?!:])$/, "$1.");
+  const fixLine = card.fix && !card.fix.includes("\n") && !f.suggestion ? ` ${sentence(card.fix)}` : "";
+  const body = card.question ? `**${card.question}** ${sentence(card.signal)}${f.why ? ` ${sentence(f.why)}` : ""}` : `${sentence(card.signal)}${fixLine || (f.why ? ` ${sentence(f.why)}` : "")}`;
+  const out = [label, "", body];
+  if (f.suggestion) out.push("", "```suggestion", f.suggestion.replacement, "```");
+  else if (card.fix && card.fix.includes("\n")) {
+    const title = f.kind === "Tests" ? "Suggested test" : f.kind === "Change size" ? "Suggested split" : "Suggested change";
+    out.push("", `<details><summary>${title}</summary>
 
-\`\`\`
+\`\`\`${f.kind === "Tests" ? "ts" : ""}
 ${card.fix}
 \`\`\`
 
 </details>`);
+  }
   const ref = card.reference ? ` \xB7 ${referenceLink(card.reference, opts.referenceBase)}` : "";
   const kata = card.kata ? ` \xB7 [practice](${card.kata})` : "";
-  out.push("", `<sub>${[risk, f.kind, `Copal \xB7 \`${f.ruleId}\``].filter(Boolean).join(" \xB7 ")}${ref}${kata}</sub>`);
-  return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
+  out.push("", `<sub>Spotted by **Copal** \xB7 \`${f.ruleId}\`${ref}${kata} \xB7 Is this helpful? React \u{1F44D} or \u{1F44E}</sub>`, commentMarker(f.ruleId));
+  return out.join("\n");
 }
 function referenceLink(ref, base2) {
   if (/^https?:\/\//.test(ref)) return `[${ref.replace(/^https?:\/\//, "")}](${ref})`;
@@ -2608,6 +2640,7 @@ export {
   changeSizeOf,
   changedLineSet,
   classify,
+  commentMarker,
   concreteTestPath,
   containsCode,
   createBaseline,
@@ -2678,6 +2711,7 @@ export {
   taskScope,
   testDetail,
   testOrderFindings,
+  testSkeletonFor,
   toYaml,
   trackRank,
   tuneSuggestion,
