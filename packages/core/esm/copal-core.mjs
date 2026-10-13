@@ -1890,7 +1890,7 @@ function reportToMarkdown(r, title = "Copal check") {
   return out.join("\n");
 }
 var KIND_ICON = { Security: "\u{1F512}", Architecture: "\u{1F3DB}\uFE0F", Dependencies: "\u{1F4E6}", Tests: "\u{1F9EA}", Complexity: "\u{1F300}", Duplication: "\u{1F4D1}", "Error prone": "\u{1F41E}", "Best practice": "\u2728", "Change size": "\u{1F4CF}" };
-var commentMarker = (ruleId) => `<!-- copal:${ruleId} -->`;
+var commentMarker = (ruleId, kind) => `<!-- copal:${ruleId}${kind ? `|${kind}` : ""} -->`;
 function findingToMarkdown(f, opts = {}) {
   const card = hintCard(f);
   const risk = f.blocking ? "\u26D4 Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
@@ -1912,7 +1912,7 @@ ${card.fix}
   }
   const ref = card.reference ? ` \xB7 ${referenceLink(card.reference, opts.referenceBase)}` : "";
   const kata = card.kata ? ` \xB7 [practice](${card.kata})` : "";
-  out.push("", `<sub>Spotted by **Copal** \xB7 \`${f.ruleId}\`${ref}${kata} \xB7 Is this helpful? React \u{1F44D} or \u{1F44E}</sub>`, commentMarker(f.ruleId));
+  out.push("", `<sub>Spotted by **Copal** \xB7 \`${f.ruleId}\`${ref}${kata} \xB7 Is this helpful? React \u{1F44D} or \u{1F44E}</sub>`, commentMarker(f.ruleId, f.kind));
   return out.join("\n");
 }
 function referenceLink(ref, base2) {
@@ -2397,7 +2397,8 @@ function weeklyReport(input) {
   const counts = /* @__PURE__ */ new Map();
   for (const d of input.dismissals ?? []) if (inWindow(d.at)) counts.set(d.ruleId, (counts.get(d.ruleId) ?? 0) + 1);
   const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed, suggestion: tuneSuggestion((input.dismissals ?? []).filter((d) => d.ruleId === ruleId && inWindow(d.at))) }));
-  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune };
+  const insights = reviewInsights(pulls.length, (input.comments ?? []).filter((c2) => inWindow(c2.at)));
+  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune, ...insights ? { review: insights } : {} };
 }
 function fmt(v, metric) {
   if (v == null) return "\u2014";
@@ -2418,6 +2419,12 @@ function weeklyReportToMarkdown(r, practiceTitle) {
   if (r.focus) {
     const t = practiceTitle?.(r.focus.practice);
     out.push(`### ${weekly ? "This week" : "Start with"}: ${r.focus.name}`, "", r.focus.action, ...t ? ["", `Practice: **${t}**`] : [], "");
+  }
+  if (r.review) {
+    const v = r.review;
+    out.push("### What the review found", "", `**${v.issues}** issues on **${v.reviewed}** changes \xB7 **${v.ledToFixes}** led to a fix \xB7 **${Math.round(v.downvoted * 100)}%** comments downvoted`, "");
+    out.push(v.byKind.map((k) => `${k.kind} ${"\u2588".repeat(Math.max(1, Math.round(k.count / v.issues * 20)))} ${k.count}`).join("  \n"), "");
+    if (v.hotspots.length) out.push(`Most findings: ${v.hotspots.map((h) => `\`${h.file}\` (${h.count})`).join(", ")}`, "");
   }
   if (r.rulesToTune.length) {
     out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");
@@ -2441,6 +2448,23 @@ function tuneSuggestion(ds) {
     if (dir && n / withFile.length >= 2 / 3) return `Most dismissals are in \`${dir}/\`: add \`exclude: ["${dir}/**"]\` to the rule.`;
   }
   return "Dismissed in several places: tighten its pattern, or set `mode: audit` until the team agrees on it.";
+}
+function reviewInsights(reviewed, comments) {
+  if (!comments.length) return void 0;
+  const kinds = /* @__PURE__ */ new Map();
+  const files = /* @__PURE__ */ new Map();
+  for (const c2 of comments) {
+    kinds.set(c2.kind ?? "Other", (kinds.get(c2.kind ?? "Other") ?? 0) + 1);
+    if (c2.file) files.set(c2.file, (files.get(c2.file) ?? 0) + 1);
+  }
+  return {
+    reviewed,
+    issues: comments.length,
+    ledToFixes: comments.filter((c2) => c2.outdated).length,
+    downvoted: comments.filter((c2) => c2.downvotes > 0).length / comments.length,
+    byKind: [...kinds].sort((a, b) => b[1] - a[1]).map(([kind, count]) => ({ kind, count })),
+    hotspots: [...files].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([file, count]) => ({ file, count }))
+  };
 }
 
 // src/reviewguide.ts
@@ -2697,6 +2721,7 @@ export {
   resolvePolicy,
   reviewActions,
   reviewChange,
+  reviewInsights,
   reviewerGuide,
   reviewerGuideToMarkdown,
   ruleHealth,

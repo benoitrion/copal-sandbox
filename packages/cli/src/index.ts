@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow, weeklyReport, weeklyReportToMarkdown, changedLineSet, onChangedLines, practice, PullRecord, DeploymentRecord, IncidentRecord, BASELINE_FILE, createBaseline, findingsFromSarif, evaluateGate, lineTextFrom, parseBaseline, withoutBaseline } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow, weeklyReport, weeklyReportToMarkdown, changedLineSet, onChangedLines, practice, PullRecord, DeploymentRecord, IncidentRecord, ReviewComment, BASELINE_FILE, createBaseline, findingsFromSarif, evaluateGate, lineTextFrom, parseBaseline, withoutBaseline } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges, branchCommits } from "./git";
 
@@ -587,6 +587,7 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
   }
   // Dismissed hints (`/copal false-positive RULE` replies on the change) → rules to tune.
   const dismissals: { ruleId: string; at: string; file?: string }[] = [];
+  const comments: ReviewComment[] = [];
   for (const p of merged) {
     for (const kind of ["issues", "pulls"]) {
       try {
@@ -595,7 +596,8 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
         for (const c of cs) {
           for (const m of String(c.body ?? "").matchAll(/^\/copal\s+(?:false-positive|fp)\s+([\w-]+)/gm)) dismissals.push({ ruleId: m[1], at: c.created_at, file: c.path });
           // 👎 on a Copal comment counts as a dismissal of its rule.
-          const own = /<!-- copal:([\w/-]+) -->/.exec(String(c.body ?? ""));
+          const own = /<!-- copal:([\w/-]+)(?:\|([^>]+?))? -->/.exec(String(c.body ?? ""));
+          if (own && kind === "pulls") comments.push({ at: c.created_at, ruleId: own[1], kind: own[2], file: c.path, outdated: c.position == null, downvotes: c.reactions?.["-1"] ?? 0 });
           for (let i = 0; own && i < (c.reactions?.["-1"] ?? 0); i++) dismissals.push({ ruleId: own[1], at: c.created_at, file: c.path });
         }
       } catch { /* comments unavailable */ }
@@ -617,7 +619,7 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
     const is: any[] = await get(`/repos/${repo}/issues?labels=${encodeURIComponent(String(flags.incidentLabel || "incident"))}&state=all&since=${new Date(since).toISOString()}&per_page=100`);
     incidents = is.length ? is.map((i) => ({ openedAt: i.created_at, resolvedAt: i.closed_at ?? undefined })) : undefined;
   } catch { incidents = undefined; }
-  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: single ? undefined : pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), days: single ? days : 7, deployments, incidents, dismissals, track: (["new-products", "legacy", "agents"] as const).find((t) => t === flags.track), now });
+  const report = weeklyReport({ pulls: pulls.filter((p) => Date.parse(p.mergedAt) >= weekAgo), previous: single ? undefined : pulls.filter((p) => Date.parse(p.mergedAt) < weekAgo), days: single ? days : 7, deployments, incidents, dismissals, comments, track: (["new-products", "legacy", "agents"] as const).find((t) => t === flags.track), now });
   if (flags.json) return console.log(JSON.stringify(report, null, 2)), 0;
   const md = weeklyReportToMarkdown(report, (id) => { const p = practice(id); return p && `${p.title} (${p.where}, ${p.minutes} min) — ${p.goal}`; });
   if (typeof flags.out === "string") {

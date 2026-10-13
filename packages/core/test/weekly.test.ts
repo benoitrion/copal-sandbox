@@ -78,3 +78,10 @@ test("weekly: an empty period says so instead of a table of unknowns", () => {
   assert.match(md, /No pull request was merged/);
   assert.ok(!md.includes("| Examples first"));
 });
+
+test("weekly: what the review found, by kind, with fixes and downvotes", () => {
+  const c = (kind: string, outdated: boolean, downvotes = 0, file = "src/a.ts") => ({ at: at(2), ruleId: "r", kind, file, outdated, downvotes });
+  const r = weeklyReport({ pulls: [pr(1, 100, true, 2)], comments: [c("Tests", true), c("Tests", false), c("Architecture", true, 1)], now });
+  assert.deepEqual(r.review, { reviewed: 1, issues: 3, ledToFixes: 2, downvoted: 1 / 3, byKind: [{ kind: "Tests", count: 2 }, { kind: "Architecture", count: 1 }], hotspots: [{ file: "src/a.ts", count: 3 }] });
+  assert.match(weeklyReportToMarkdown(r), /\*\*3\*\* issues on \*\*1\*\* changes · \*\*2\*\* led to a fix · \*\*33%\*\* comments downvoted/);
+});

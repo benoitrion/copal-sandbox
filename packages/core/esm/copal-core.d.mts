@@ -330,7 +330,7 @@ export declare function formatReport(r: Report, opts?: FormatOptions): string;
 export declare function groupFindings(findings: Finding[]): Finding[][];
 export declare function reportToMarkdown(r: Report, title?: string): string;
 /** Marker so the bot recognises its own inline comments (never repeat one) without parsing the prose. */
-export declare const commentMarker: (ruleId: string) => string;
+export declare const commentMarker: (ruleId: string, kind?: string) => string;
 /**
  * One inline review comment, like a good reviewer's: a label with the risk, one specific paragraph (what this code
  * does, why it matters), the change to commit when there is one, and a one-line footer for feedback.

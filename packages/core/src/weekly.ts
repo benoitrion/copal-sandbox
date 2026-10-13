@@ -65,6 +65,8 @@ export interface WeeklyReport {
   focus: { discipline: DisciplineId; name: string; action: string; practice: string } | null;
   /** Team rules dismissed as false positives this week: tune or remove them, or developers stop reading hints. */
   rulesToTune: { ruleId: string; dismissed: number; suggestion: string }[];
+  /** What the Copal review found on merged changes, like a reviewer's scorecard. */
+  review?: ReviewInsights;
 }
 
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|testing)\/|[._-](test|spec)s?\.[a-z0-9]+$|Tests?\.(java|kt|cs|scala|swift)$|_test\.(go|py|rb|exs?)$|(^|\/)test_[^/]+\.py$/i;
@@ -141,6 +143,8 @@ export function weeklyReport(input: {
   incidents?: IncidentRecord[];
   /** Hints dismissed as false positives (`/copal false-positive RULE`, `copal-ignore`). */
   dismissals?: { ruleId: string; at: string; file?: string }[];
+  /** Copal's inline comments on the merged changes: kind, whether the code changed after it, thumbs down. */
+  comments?: ReviewComment[];
   /** The team's track: breaks ties between equally weak disciplines and picks track-specific exercises. */
   track?: Track;
   now?: number;
@@ -212,7 +216,8 @@ export function weeklyReport(input: {
   for (const d of input.dismissals ?? []) if (inWindow(d.at)) counts.set(d.ruleId, (counts.get(d.ruleId) ?? 0) + 1);
   const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed, suggestion: tuneSuggestion((input.dismissals ?? []).filter((d) => d.ruleId === ruleId && inWindow(d.at))) }));
 
-  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune };
+  const insights = reviewInsights(pulls.length, (input.comments ?? []).filter((c) => inWindow(c.at)));
+  return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune, ...(insights ? { review: insights } : {}) };
 }
 
 function fmt(v: number | null, metric: string): string {
@@ -235,6 +240,12 @@ export function weeklyReportToMarkdown(r: WeeklyReport, practiceTitle?: (id: str
   if (r.focus) {
     const t = practiceTitle?.(r.focus.practice);
     out.push(`### ${weekly ? "This week" : "Start with"}: ${r.focus.name}`, "", r.focus.action, ...(t ? ["", `Practice: **${t}**`] : []), "");
+  }
+  if (r.review) {
+    const v = r.review;
+    out.push("### What the review found", "", `**${v.issues}** issues on **${v.reviewed}** changes · **${v.ledToFixes}** led to a fix · **${Math.round(v.downvoted * 100)}%** comments downvoted`, "");
+    out.push(v.byKind.map((k) => `${k.kind} ${"█".repeat(Math.max(1, Math.round((k.count / v.issues) * 20)))} ${k.count}`).join("  \n"), "");
+    if (v.hotspots.length) out.push(`Most findings: ${v.hotspots.map((h) => `\`${h.file}\` (${h.count})`).join(", ")}`, "");
   }
   if (r.rulesToTune.length) {
     out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");
@@ -260,4 +271,42 @@ export function tuneSuggestion(ds: { file?: string }[]): string {
     if (dir && n / withFile.length >= 2 / 3) return `Most dismissals are in \`${dir}/\`: add \`exclude: ["${dir}/**"]\` to the rule.`;
   }
   return "Dismissed in several places: tighten its pattern, or set `mode: audit` until the team agrees on it.";
+}
+
+export interface ReviewComment {
+  at: string;
+  ruleId: string;
+  kind?: string;
+  file?: string;
+  /** The line changed after the comment (GitHub marks it outdated): the comment led to a fix. */
+  outdated: boolean;
+  downvotes: number;
+}
+
+export interface ReviewInsights {
+  reviewed: number;
+  issues: number;
+  ledToFixes: number;
+  /** Share of comments with at least one 👎. */
+  downvoted: number;
+  byKind: { kind: string; count: number }[];
+  hotspots: { file: string; count: number }[];
+}
+
+export function reviewInsights(reviewed: number, comments: ReviewComment[]): ReviewInsights | undefined {
+  if (!comments.length) return undefined;
+  const kinds = new Map<string, number>();
+  const files = new Map<string, number>();
+  for (const c of comments) {
+    kinds.set(c.kind ?? "Other", (kinds.get(c.kind ?? "Other") ?? 0) + 1);
+    if (c.file) files.set(c.file, (files.get(c.file) ?? 0) + 1);
+  }
+  return {
+    reviewed,
+    issues: comments.length,
+    ledToFixes: comments.filter((c) => c.outdated).length,
+    downvoted: comments.filter((c) => c.downvotes > 0).length / comments.length,
+    byKind: [...kinds].sort((a, b) => b[1] - a[1]).map(([kind, count]) => ({ kind, count })),
+    hotspots: [...files].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([file, count]) => ({ file, count })),
+  };
 }

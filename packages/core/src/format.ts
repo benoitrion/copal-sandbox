@@ -98,7 +98,7 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
 const KIND_ICON: Record<string, string> = { Security: "🔒", Architecture: "🏛️", Dependencies: "📦", Tests: "🧪", Complexity: "🌀", Duplication: "📑", "Error prone": "🐞", "Best practice": "✨", "Change size": "📏" };
 
 /** Marker so the bot recognises its own inline comments (never repeat one) without parsing the prose. */
-export const commentMarker = (ruleId: string) => `<!-- copal:${ruleId} -->`;
+export const commentMarker = (ruleId: string, kind?: string) => `<!-- copal:${ruleId}${kind ? `|${kind}` : ""} -->`;
 
 /**
  * One inline review comment, like a good reviewer's: a label with the risk, one specific paragraph (what this code
@@ -121,7 +121,7 @@ export function findingToMarkdown(f: Finding, opts: { referenceBase?: string } =
   }
   const ref = card.reference ? ` · ${referenceLink(card.reference, opts.referenceBase)}` : "";
   const kata = card.kata ? ` · [practice](${card.kata})` : "";
-  out.push("", `<sub>Spotted by **Copal** · \`${f.ruleId}\`${ref}${kata} · Is this helpful? React 👍 or 👎</sub>`, commentMarker(f.ruleId));
+  out.push("", `<sub>Spotted by **Copal** · \`${f.ruleId}\`${ref}${kata} · Is this helpful? React 👍 or 👎</sub>`, commentMarker(f.ruleId, f.kind));
   return out.join("\n");
 }
 
