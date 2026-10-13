@@ -79,7 +79,7 @@ step "Review my change (local, no server) on scenario 01"
 PREV=$(git rev-parse --abbrev-ref HEAD); git checkout -q main
 cp -r "$SCEN/01-invoice-rounding/." . && rm -f DESCRIPTION.md
 RV=$(COPAL_SERVER= $COPAL review --base main --json)
-echo "$RV" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);const ids=r.cards.map(c=>c.ruleId).sort().join(',');const ok=ids==='hardcoded-credentials,invoice-contract-test,ledger-rounding'&&r.cards.every(c=>c.actions.join('|')==='Ask me|Explain|Show me');if(!ok)console.error(ids);process.exit(ok?0:1)})" && ok "3 hint cards with Ask me / Explain / Show me" || ko "review cards wrong"
+echo "$RV" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);const ids=r.cards.map(c=>c.ruleId).sort().join(',');const ok=ids==='hardcoded-credentials,invoice-contract-test,ledger-rounding'&&r.cards.every(c=>c.actions.join('|')===(c.ruleId==='invoice-contract-test'?'Explain|Show me':'Ask me|Explain|Show me'));if(!ok)console.error(ids);process.exit(ok?0:1)})" && ok "3 hint cards; questions only on team decisions" || ko "review cards wrong"
 git checkout -q -- . && git clean -qfd src && git checkout -q "$PREV"
 
 step "Tests first: commit order on the branch (copal check --base)"
