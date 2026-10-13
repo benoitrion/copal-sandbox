@@ -164,7 +164,8 @@ test("extension reports findings and offers quick fixes", async (t) => {
   const showMe = actions.find((a: CodeAction) => a.title.startsWith("Copal: Show me"));
   assert.equal(showMe.edit.ops[0].text, "  const total = LedgerPort.round(sum, Currency.EUR);");
   assert.equal(showMe.isPreferred, false, "the fix is never the preferred one-click action for coached rules");
-  assert.equal(actions.at(-1).edit.ops[0].text, "  // copal-ignore ledger-rounding\n");
+  assert.equal(actions.at(-1).edit, undefined, "Not relevant never writes into the code");
+  assert.equal(actions.at(-1).command.command, "copal.notRelevant");
 
   // clean file → no diagnostics
   const clean = doc(path.join(tmp, "src/service/invoice-service.ts"));
@@ -194,8 +195,8 @@ test("coached findings lead with the question; the fix is behind Show me", async
   const titles = provider.provideCodeActions(d, rounding.range, { diagnostics: [rounding] }).map((a: CodeAction) => a.title);
   assert.deepEqual(titles.slice(0, 2), ["Copal: Show me (ledger-rounding)", "Copal: Fix with my assistant"]);
   const hover = hoverProvider.provideHover(d, new Position(7, 4));
-  assert.match(hover.contents.value, /\*\*Who owns rounding in this codebase\?\*\*/);
-  assert.equal((hover.contents.value.match(/Who owns rounding/g) ?? []).length, 1, "the question appears once");
+  assert.equal(rounding.message, "Who owns rounding in this codebase?", "the diagnostic is the question, nothing else");
+  assert.doesNotMatch(hover.contents.value, /Who owns rounding/, "VS Code already shows the question above the card");
   assert.match(hover.contents.value, /command:copal\.fixWithAssistant/);
   assert.match(hover.contents.value, /command:copal\.notRelevant/);
   assert.doesNotMatch(hover.contents.value, /command:copal\.ask/);

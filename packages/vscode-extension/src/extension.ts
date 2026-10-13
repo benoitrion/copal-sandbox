@@ -62,7 +62,7 @@ function toDiagnostic(doc: vscode.TextDocument, f: Finding): vscode.Diagnostic {
   const end = f.endColumn ? f.endColumn - 1 : text.length;
   const d = new vscode.Diagnostic(
     new vscode.Range(line, start, line, Math.max(end, start + 1)),
-    f.coach?.question ? `${f.coach.question} (${f.message})` : `${f.message}${f.why ? ` — ${f.why}` : ""}`,
+    f.coach?.question ?? f.message,
     // Coaching is a conversation, not an error: only rules the team set to block get a red squiggle.
     f.blocking ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Information,
   );
@@ -70,6 +70,10 @@ function toDiagnostic(doc: vscode.TextDocument, f: Finding): vscode.Diagnostic {
   d.code = f.ruleId;
   return d;
 }
+
+/** Dismissals ("Not relevant") follow the line's text, so they survive edits above it. */
+let memento: { get(key: string): unknown; update(key: string, value: unknown): PromiseLike<void> } | undefined;
+const dismissKey = (ruleId: string, file: string, lineText: string) => `copal.dismissed:${ruleId}:${file}:${lineText.trim()}`;
 
 function check(doc: vscode.TextDocument) {
   const p = policyFor(doc);
@@ -84,7 +88,7 @@ function check(doc: vscode.TextDocument) {
   const full = evaluate([fileAsChange(rel, doc.getText()), ...others], p.policy, { environment: cfg().environment });
   // Only code changed since the last commit gets hints (like "clean as you code"); untouched code stays quiet.
   const changed = cfg().hints === "all" ? null : changedLines(p.root, rel, doc.getText());
-  const keep = onChangedLines(full.findings, p.policy, rel, changed);
+  const keep = onChangedLines(full.findings, p.policy, rel, changed).filter((f) => !memento?.get(dismissKey(f.ruleId, doc.uri.fsPath, doc.lineAt(Math.max(f.line - 1, 0)).text)));
   const report = { ...full, findings: keep, blocking: keep.some((f) => f.blocking), summary: { ...full.summary, total: keep.length, blocking: keep.filter((f) => f.blocking).length, audit: keep.filter((f) => !f.blocking).length } };
   policyOf.set(doc.uri.toString(), p.policy);
   findingsByUri.set(doc.uri.toString(), report.findings);
@@ -169,9 +173,8 @@ const cmdLink = (label: string, command: string, ref: FindingRef) => `[${label}]
 export function hintCardMarkdown(f: Finding, uri: string, policy?: Policy): string {
   const c = hintCard(f);
   const ref: FindingRef = { uri, ruleId: f.ruleId, line: f.line };
-  const icon = f.blocking ? "$(error)" : "$(comment-discussion)";
-  const out = [`${icon} **${c.question ?? c.signal}**`, ""];
-  out.push(c.question ? `${c.signal}${c.why ? ` · *${c.why}*` : ""}` : c.why ? `*${c.why}*` : "");
+  // VS Code prints the diagnostic (the question) right above this card: don't say it twice.
+  const out = [c.question ? c.signal : c.why ? `*${c.why}*` : ""];
   const rule = policy?.rules.find((r) => r.id === f.ruleId);
   const links = [
     rule?.requireTest ? cmdLink("Create the test", "copal.createTest", ref) : "",
@@ -179,10 +182,9 @@ export function hintCardMarkdown(f: Finding, uri: string, policy?: Policy): stri
     cmdLink("Fix with my assistant", "copal.fixWithAssistant", ref),
     cmdLink("Not relevant", "copal.notRelevant", ref),
   ].filter(Boolean);
-  out.push("", links.join(" · "));
-  if (c.kata) out.push("", `$(mortar-board) Practice: [kata](${c.kata})`);
   const risk = f.blocking ? "Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
-  out.push("", `*${[risk, f.kind, `Copal · ${f.ruleId}`].filter(Boolean).join(" · ")}*`);
+  out.push("", `${links.join(" · ")}${risk ? ` — *${risk}*` : ""}`);
+  if (c.kata) out.push("", `$(mortar-board) Practice: [kata](${c.kata})`);
   return out.join("\n");
 }
 
@@ -329,18 +331,16 @@ async function fixWithAssistant(ref: FindingRef) {
   vscode.window.showInformationMessage("Copal: no AI chat found here, so the request is in your clipboard. Paste it into your assistant.");
 }
 
-/** "Not relevant": suppresses this occurrence with a comment the team can see, and records it for "rules to tune". */
+/** "Not relevant": hides this hint on this machine and records it for the team's "rules to tune". */
 async function notRelevant(ref: FindingRef) {
   const f = findingFor(ref);
   if (!f) return;
+  // No comment in the code: the dismissal stays on this machine and is counted for the team's "rules to tune".
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(ref.uri));
-  const lineText = doc.lineAt(f.line - 1).text;
-  const indent = lineText.slice(0, lineText.length - lineText.trimStart().length);
-  const comment = /\.(py|ya?ml|sh)$/.test(doc.fileName) ? "#" : "//";
-  const edit = new vscode.WorkspaceEdit();
-  edit.insert(doc.uri, new vscode.Position(f.line - 1, 0), `${indent}${comment} copal-ignore ${f.ruleId}\n`);
-  await vscode.workspace.applyEdit(edit);
+  const key = dismissKey(f.ruleId, doc.uri.fsPath, doc.lineAt(f.line - 1).text);
+  await memento?.update(key, true);
   void coachEvent(f, 0, "false_positive", ref.uri);
+  check(doc);
 }
 
 // ---------------------------------------------------------------- review my change
@@ -585,12 +585,7 @@ class QuickFixes implements vscode.CodeActionProvider {
       fx.diagnostics = [d];
       actions.push(fx);
       const ignore = new vscode.CodeAction(`Copal: Not relevant here (${f.ruleId})`, vscode.CodeActionKind.QuickFix);
-      ignore.edit = new vscode.WorkspaceEdit();
-      const lineText = doc.lineAt(f.line - 1).text;
-      const indent = lineText.slice(0, lineText.length - lineText.trimStart().length);
-      const comment = /\.(py|ya?ml|sh)$/.test(doc.fileName) ? "#" : "//";
-      ignore.edit.insert(doc.uri, new vscode.Position(f.line - 1, 0), `${indent}${comment} copal-ignore ${f.ruleId}\n`);
-      ignore.command = { title: "record", command: "copal.recordFalsePositive", arguments: [ref] };
+      ignore.command = { title: "Not relevant", command: "copal.notRelevant", arguments: [ref] };
       ignore.diagnostics = [d];
       actions.push(ignore);
     }
@@ -615,6 +610,7 @@ async function flushHeartbeats(ctx: vscode.ExtensionContext) {
 }
 
 export function activate(ctx: vscode.ExtensionContext) {
+  memento = ctx.workspaceState;
   extCtx = ctx;
   diagnostics = vscode.languages.createDiagnosticCollection(SOURCE);
   output = vscode.window.createOutputChannel("Copal");
