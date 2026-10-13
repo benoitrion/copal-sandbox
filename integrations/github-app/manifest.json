@@ -1,0 +1,15 @@
+{
+  "name": "Copal",
+  "url": "https://copal.tech",
+  "hook_attributes": { "url": "https://YOUR-COPAL-SERVER/webhooks/github" },
+  "redirect_url": "https://copal.tech/start.html",
+  "public": true,
+  "default_permissions": {
+    "contents": "read",
+    "pull_requests": "write",
+    "statuses": "write",
+    "issues": "write",
+    "metadata": "read"
+  },
+  "default_events": ["pull_request", "issue_comment", "pull_request_review_comment"]
+}
