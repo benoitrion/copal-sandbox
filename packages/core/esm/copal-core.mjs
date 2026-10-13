@@ -2325,7 +2325,7 @@ function weeklyReport(input) {
   const focus = pick && pick.status !== "strong" && pick.status !== "unknown" ? { discipline: pick.id, name: pick.name, action: NEXT_ACTIONS[pick.id].action, practice: pick.id === "review" ? NEXT_ACTIONS.review.practice : startingPractice(pick.id, pick.status, input.track).id } : null;
   const counts = /* @__PURE__ */ new Map();
   for (const d of input.dismissals ?? []) if (inWindow(d.at)) counts.set(d.ruleId, (counts.get(d.ruleId) ?? 0) + 1);
-  const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed }));
+  const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed, suggestion: tuneSuggestion((input.dismissals ?? []).filter((d) => d.ruleId === ruleId && inWindow(d.at))) }));
   return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune };
 }
 function fmt(v, metric) {
@@ -2350,13 +2350,26 @@ function weeklyReportToMarkdown(r, practiceTitle) {
   }
   if (r.rulesToTune.length) {
     out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");
-    for (const t of r.rulesToTune) out.push(`- \`${t.ruleId}\`: dismissed ${t.dismissed} times`);
+    for (const t of r.rulesToTune) out.push(`- \`${t.ruleId}\`: dismissed ${t.dismissed} times. ${t.suggestion}`);
     out.push("");
   }
   out.push("### Delivery", "", "| Metric | Value | Note |", "|---|---|---|");
   for (const d of r.delivery) out.push(`| ${d.name} | ${d.value == null ? "\u2014" : d.unit.startsWith("share") ? `${Math.round(d.value * 100)}%` : `${Math.round(d.value * 100) / 100} ${d.unit}`} | ${d.note ?? ""} |`);
   out.push("", "_Delivery metrics follow DORA's five software delivery metrics where the data allows: trends to discuss, not targets._");
   return out.join("\n");
+}
+function tuneSuggestion(ds) {
+  const withFile = ds.filter((d) => d.file);
+  if (withFile.length >= 2) {
+    const folders = /* @__PURE__ */ new Map();
+    for (const d of withFile) {
+      const dir2 = d.file.split("/").slice(0, -1).join("/");
+      folders.set(dir2, (folders.get(dir2) ?? 0) + 1);
+    }
+    const [dir, n] = [...folders].sort((a, b) => b[1] - a[1])[0];
+    if (dir && n / withFile.length >= 2 / 3) return `Most dismissals are in \`${dir}/\`: add \`exclude: ["${dir}/**"]\` to the rule.`;
+  }
+  return "Dismissed in several places: tighten its pattern, or set `mode: audit` until the team agrees on it.";
 }
 
 // src/reviewguide.ts
@@ -2627,6 +2640,7 @@ export {
   testOrderFindings,
   toYaml,
   trackRank,
+  tuneSuggestion,
   validatePolicy,
   weeklyReport,
   weeklyReportToMarkdown,

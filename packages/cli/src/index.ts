@@ -578,12 +578,15 @@ async function weeklyCmd(flags: Record<string, string | boolean>): Promise<numbe
     });
   }
   // Dismissed hints (`/copal false-positive RULE` replies on the change) → rules to tune.
-  const dismissals: { ruleId: string; at: string }[] = [];
+  const dismissals: { ruleId: string; at: string; file?: string }[] = [];
   for (const p of merged) {
-    try {
-      const cs: any[] = await get(`/repos/${repo}/issues/${p.number}/comments?per_page=100`);
-      for (const c of cs) for (const m of String(c.body ?? "").matchAll(/^\/copal\s+(?:false-positive|fp)\s+([\w-]+)/gm)) dismissals.push({ ruleId: m[1], at: c.created_at });
-    } catch { /* comments unavailable */ }
+    for (const kind of ["issues", "pulls"]) {
+      try {
+        // Conversation replies, and replies in an inline thread (which carry the file).
+        const cs: any[] = await get(`/repos/${repo}/${kind}/${p.number}/comments?per_page=100`);
+        for (const c of cs) for (const m of String(c.body ?? "").matchAll(/^\/copal\s+(?:false-positive|fp)\s+([\w-]+)/gm)) dismissals.push({ ruleId: m[1], at: c.created_at, file: c.path });
+      } catch { /* comments unavailable */ }
+    }
   }
   const weekAgo = single ? since : now - 7 * 864e5;
   let deployments: DeploymentRecord[] | undefined;

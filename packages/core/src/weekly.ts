@@ -64,7 +64,7 @@ export interface WeeklyReport {
   /** The discipline to work on next, with what to do this week. */
   focus: { discipline: DisciplineId; name: string; action: string; practice: string } | null;
   /** Team rules dismissed as false positives this week: tune or remove them, or developers stop reading hints. */
-  rulesToTune: { ruleId: string; dismissed: number }[];
+  rulesToTune: { ruleId: string; dismissed: number; suggestion: string }[];
 }
 
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|testing)\/|[._-](test|spec)s?\.[a-z0-9]+$|Tests?\.(java|kt|cs|scala|swift)$|_test\.(go|py|rb|exs?)$|(^|\/)test_[^/]+\.py$/i;
@@ -140,7 +140,7 @@ export function weeklyReport(input: {
   deployments?: DeploymentRecord[];
   incidents?: IncidentRecord[];
   /** Hints dismissed as false positives (`/copal false-positive RULE`, `copal-ignore`). */
-  dismissals?: { ruleId: string; at: string }[];
+  dismissals?: { ruleId: string; at: string; file?: string }[];
   /** The team's track: breaks ties between equally weak disciplines and picks track-specific exercises. */
   track?: Track;
   now?: number;
@@ -210,7 +210,7 @@ export function weeklyReport(input: {
 
   const counts = new Map<string, number>();
   for (const d of input.dismissals ?? []) if (inWindow(d.at)) counts.set(d.ruleId, (counts.get(d.ruleId) ?? 0) + 1);
-  const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed }));
+  const rulesToTune = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([ruleId, dismissed]) => ({ ruleId, dismissed, suggestion: tuneSuggestion((input.dismissals ?? []).filter((d) => d.ruleId === ruleId && inWindow(d.at))) }));
 
   return { from: new Date(from).toISOString(), to: new Date(now).toISOString(), changes: pulls.length, disciplines, delivery, focus, rulesToTune };
 }
@@ -238,11 +238,26 @@ export function weeklyReportToMarkdown(r: WeeklyReport, practiceTitle?: (id: str
   }
   if (r.rulesToTune.length) {
     out.push("### Rules to tune", "", "Developers dismissed these hints as wrong. Fix the rule, narrow its paths, or remove it: noisy hints get ignored.", "");
-    for (const t of r.rulesToTune) out.push(`- \`${t.ruleId}\`: dismissed ${t.dismissed} times`);
+    for (const t of r.rulesToTune) out.push(`- \`${t.ruleId}\`: dismissed ${t.dismissed} times. ${t.suggestion}`);
     out.push("");
   }
   out.push("### Delivery", "", "| Metric | Value | Note |", "|---|---|---|");
   for (const d of r.delivery) out.push(`| ${d.name} | ${d.value == null ? "—" : d.unit.startsWith("share") ? `${Math.round(d.value * 100)}%` : `${Math.round(d.value * 100) / 100} ${d.unit}`} | ${d.note ?? ""} |`);
   out.push("", "_Delivery metrics follow DORA's five software delivery metrics where the data allows: trends to discuss, not targets._");
   return out.join("\n");
+}
+
+/** The smallest change to a noisy rule: exclude the folder where dismissals concentrate, else make it audit-only. */
+export function tuneSuggestion(ds: { file?: string }[]): string {
+  const withFile = ds.filter((d) => d.file);
+  if (withFile.length >= 2) {
+    const folders = new Map<string, number>();
+    for (const d of withFile) {
+      const dir = d.file!.split("/").slice(0, -1).join("/");
+      folders.set(dir, (folders.get(dir) ?? 0) + 1);
+    }
+    const [dir, n] = [...folders].sort((a, b) => b[1] - a[1])[0];
+    if (dir && n / withFile.length >= 2 / 3) return `Most dismissals are in \`${dir}/\`: add \`exclude: ["${dir}/**"]\` to the rule.`;
+  }
+  return "Dismissed in several places: tighten its pattern, or set `mode: audit` until the team agrees on it.";
 }

@@ -46,8 +46,8 @@ test("weekly: delivery metrics only when data allows", () => {
 });
 
 test("weekly: rules developers keep dismissing are listed to tune", () => {
-  const r = weeklyReport({ pulls: [pr(1, 100, true, 2)], dismissals: [{ ruleId: "no-any", at: at(5) }, { ruleId: "no-any", at: at(3) }, { ruleId: "todo-left", at: at(2) }], now });
-  assert.deepEqual(r.rulesToTune, [{ ruleId: "no-any", dismissed: 2 }]);
+  const r = weeklyReport({ pulls: [pr(1, 100, true, 2)], dismissals: [{ ruleId: "no-any", at: at(5), file: "src/generated/a.ts" }, { ruleId: "no-any", at: at(3), file: "src/generated/b.ts" }, { ruleId: "todo-left", at: at(2) }], now });
+  assert.deepEqual(r.rulesToTune, [{ ruleId: "no-any", dismissed: 2, suggestion: 'Most dismissals are in `src/generated/`: add `exclude: ["src/generated/**"]` to the rule.' }]);
   assert.match(weeklyReportToMarkdown(r), /Rules to tune[\s\S]*no-any/);
 });
 
