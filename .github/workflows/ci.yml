@@ -34,7 +34,11 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew test buildPlugin --no-daemon --stacktrace
+      - run: |
+          set -o pipefail
+          ./gradlew test buildPlugin --no-daemon 2>&1 | tee gradle.log || {
+            grep -E "^e: |FAILED|Exception|expected:" gradle.log | head -15 | while IFS= read -r l; do echo "::error title=Gradle::${l//%/%25}"; done
+            exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: copal-jetbrains-plugin
