@@ -118,7 +118,7 @@ extends: [builtin:security, builtin:testing, builtin:hexagonal, builtin:clean-co
 navigator: { enabled: true, minScope: feature, maxQuestions: 3, questions: [first-example, placement, risk] }
 rules:
   - id: ledger-rounding
-    pattern: "Math\\.round\\(\\s*(\\w+)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
+    pattern: "Math\\.round\\(\\s*([^()]+?)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
     severity: audit        # alias v4 : block = enforce, audit = audit
     coach:
       question: Who owns rounding in this codebase?          # niveau 1 — jamais de code dans la question
@@ -154,7 +154,7 @@ rules:
     deny: "src/web/** -> src/persistence/**"
     why: "Keep persistence behind the API boundary."
   - id: ledger-rounding             # motif + correction concrète
-    pattern: "Math\\.round\\(\\s*(\\w+)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
+    pattern: "Math\\.round\\(\\s*([^()]+?)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
     fix: { with: "LedgerPort.round($1, Currency.EUR)" }
     paths: ["src/**/*.ts"]
     exclude: ["src/ports/**"]

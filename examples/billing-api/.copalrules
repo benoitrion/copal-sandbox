@@ -41,7 +41,7 @@ rules:
     severity: error
     paths: ["src/**/*.ts"]
     exclude: ["src/ports/**"]
-    pattern: "Math\\.round\\(\\s*(\\w+)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
+    pattern: "Math\\.round\\(\\s*([^()]+?)\\s*\\*\\s*100\\s*\\)\\s*/\\s*100"
     fix:
       with: "LedgerPort.round($1, Currency.EUR)"
     message: "Inline rounding bypasses LedgerPort"
