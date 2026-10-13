@@ -109,6 +109,8 @@ export interface Policy {
     /** Globs for paths that always deserve a careful review (auth, billing, migrations…). Used by the reviewer guide. */
     risk?: string[];
     rules: Rule[];
+    /** Pass/fail on what a change introduces (like a quality gate). */
+    gate?: Gate;
     redact?: RedactPattern[];
     environments?: Record<string, EnvironmentOverride>;
 }
@@ -169,6 +171,16 @@ export interface Report {
     };
     filesChecked: number;
     rulesEvaluated: number;
+}
+export interface Gate {
+    /** Maximum number of new, non-blocking findings per risk level. */
+    maxNew?: {
+        high?: number;
+        medium?: number;
+        low?: number;
+    };
+    /** Fail when code changes without a test (requireTest rules). */
+    requireTests?: boolean;
 }
 
 // ---- yaml

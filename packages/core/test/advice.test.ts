@@ -44,3 +44,17 @@ test("hints say something about this code: the fields an `any` value uses, the u
   assert.equal(hintCard({ ruleId: "no-explicit-any", kind: "Best practice", message: "m", coach: { question: "q?" } } as never).question, undefined, "mechanical: no question");
   assert.equal(hintCard({ ruleId: "ui-no-persistence", kind: "Architecture", message: "m", coach: { question: "q?" } } as never).question, "q?", "a team decision: asked");
 });
+
+test("baseline keeps old findings quiet; the gate judges only what the change introduces", () => {
+  const { createBaseline, withoutBaseline, lineTextFrom, evaluateGate } = require("../src/baseline");
+  const p = resolvePolicy(parsePolicy("version: 4\nextends: [builtin:quality]\nrules: []\n"));
+  const old = fileAsChange("src/a.ts", "export function f(x: any) { return x.id; }\n");
+  const b = createBaseline(evaluate([old], p).findings, lineTextFrom([old]));
+  assert.ok(b.entries.length >= 1);
+  // the same line moved down by an edit above it: still known
+  const edited = fileAsChange("src/a.ts", "// new comment\nexport function f(x: any) { return x.id; }\nexport function g(y: any) { return y.total; }\n");
+  const fresh = withoutBaseline(evaluate([edited], p).findings, b, lineTextFrom([edited]));
+  assert.deepEqual(fresh.map((f: { line: number }) => f.line), [3], "only the new any on line 3 speaks");
+  assert.deepEqual(evaluateGate(fresh, { maxNew: { low: 0 } }), { passed: false, reasons: ["1 new low-risk issue (max 0)"] });
+  assert.deepEqual(evaluateGate([], { maxNew: { high: 0 }, requireTests: true }), { passed: true, reasons: [] });
+});

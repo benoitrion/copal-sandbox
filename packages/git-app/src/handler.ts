@@ -1,6 +1,6 @@
 import * as crypto from "node:crypto";
 import { CopalClient } from "@copal/client";
-import { parsePolicy, reportToMarkdown, resolvePolicy, reviewerGuide, reviewerGuideToMarkdown, scopeCheck, testOrderFindings } from "@copal/core";
+import { evaluateGate, gateLine, lineTextFrom, parseBaseline, withoutBaseline, parsePolicy, reportToMarkdown, resolvePolicy, reviewerGuide, reviewerGuideToMarkdown, scopeCheck, testOrderFindings } from "@copal/core";
 import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider, ChangeSet } from "./providers";
 import { COMMAND_RX, runCommand } from "./commands";
 
@@ -65,14 +65,30 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
         log(`${provider.label}: commit order unavailable (${(e as Error).message})`);
       }
     }
+    // Baseline: what was already in the code stays quiet; the review and the gate speak about this change only.
+    if (cs.baselineText) {
+      const kept = withoutBaseline(result.findings, parseBaseline(cs.baselineText), lineTextFrom(cs.files));
+      result.findings = kept;
+      result.blocking = kept.some((f) => f.blocking);
+      result.summary = { ...result.summary, total: kept.length, blocking: kept.filter((f) => f.blocking).length, audit: kept.filter((f) => !f.blocking).length };
+    }
+    let gate: ReturnType<typeof evaluateGate>;
+    try {
+      gate = evaluateGate(result.findings, resolvePolicy(parsePolicy(cs.policyText)).gate);
+    } catch {
+      gate = undefined;
+    }
+    const failed = result.blocking || (gate ? !gate.passed : false);
     // project name comes from the policy itself when the server parses it
     if (result.analysisId) lastAnalysis.set(provider.label, result.analysisId);
     const desc = result.blocking
       ? `${result.summary.blocking} blocking finding(s) — changes requested`
+      : gate && !gate.passed
+        ? `Gate failed: ${gate.reasons.join(" · ")}`
       : result.findings.length
         ? `Passed with ${result.summary.audit} audit finding(s)`
         : "Passed — no findings";
-    let scope = scopeMarkdown(cs);
+    let scope = [gateLine(gate), scopeMarkdown(cs)].filter(Boolean).join("\n\n") || undefined;
     try {
       // Reviewer guide: where to look first (tests, brief, risky files), so review effort goes where it matters.
       const policy = resolvePolicy(parsePolicy(cs.policyText));
@@ -105,7 +121,7 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       // Same findings as the last review and nothing new inline: update the status only, no new notification.
       const fingerprint = `<!-- copal:${[...new Set(result.findings.map((f) => `${f.ruleId}:${f.file}`))].sort().join(",")}${scope ? ":" + scope.length : ""} -->`;
       if (!inline.length && previous.reviews.some((b) => b.includes(fingerprint))) {
-        await provider.setStatus(cs.headSha, result.blocking ? "failure" : "success", desc);
+        await provider.setStatus(cs.headSha, failed ? "failure" : "success", desc);
         return result;
       }
       scope = (scope ? `${scope}\n\n` : "") + fingerprint;
@@ -115,8 +131,8 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
         log(`${provider.label} review failed (${(e as Error).message}); posting a summary comment instead`);
         await provider.comment(reportToMarkdown(result) + (scope ? `\n\n${scope}` : ""));
       }
-    } else if (scope) await provider.comment(scope);
-    await provider.setStatus(cs.headSha, result.blocking ? "failure" : "success", desc);
+    } else if (scope && !(gate?.passed && !scopeMarkdown(cs))) await provider.comment(scope);
+    await provider.setStatus(cs.headSha, failed ? "failure" : "success", desc);
     // Growth: the PR author saw these hints (best effort; same ladder level as the inline comment shows).
     if (result.findings.length && typeof client.coachEvents === "function") {
       let project: string | undefined;

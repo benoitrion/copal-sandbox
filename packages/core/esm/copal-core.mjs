@@ -945,6 +945,7 @@ function normalize(raw, origin) {
     mode: o.mode,
     navigator: o.navigator ?? void 0,
     risk: toArr(o.risk),
+    ...o.gate && typeof o.gate === "object" ? { gate: o.gate } : {},
     extends: ext === void 0 || ext === null ? [] : Array.isArray(ext) ? ext : [String(ext)],
     rules: (o.rules ?? []).map((r) => normalizeRule({ ...r, paths: toArr(r.paths), exclude: toArr(r.exclude), sources: toArr(r.sources) })),
     redact: o.redact ?? [],
@@ -981,6 +982,7 @@ function mergePolicies(parent, child) {
     navigator: child.navigator ?? parent.navigator,
     risk: [.../* @__PURE__ */ new Set([...parent.risk ?? [], ...child.risk ?? []])],
     rules: [...byId.values()],
+    ...child.gate ?? parent.gate ? { gate: child.gate ?? parent.gate } : {},
     redact: [...parent.redact ?? [], ...child.redact ?? []],
     environments: envs
   };
@@ -1865,6 +1867,57 @@ function rulesToGuidance(rules, filePath) {
   return out.join("\n");
 }
 
+// src/baseline.ts
+var BASELINE_FILE = ".copal/baseline.json";
+function baselineKey(f, lineText) {
+  return `${f.ruleId}|${f.file}|${lineText.trim().replace(/\s+/g, " ")}`;
+}
+function createBaseline(findings, lineText, now = /* @__PURE__ */ new Date()) {
+  return { version: 1, createdAt: now.toISOString().slice(0, 10), entries: [...new Set(findings.map((f) => baselineKey(f, lineText(f))))].sort() };
+}
+function parseBaseline(text) {
+  if (!text) return void 0;
+  try {
+    const b = JSON.parse(text);
+    return Array.isArray(b.entries) ? b : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function withoutBaseline(findings, baseline, lineText) {
+  if (!baseline) return findings;
+  const known = new Set(baseline.entries);
+  return findings.filter((f) => !known.has(baselineKey(f, lineText(f))));
+}
+function lineTextFrom(files) {
+  const cache2 = /* @__PURE__ */ new Map();
+  return (f) => {
+    const file = files.find((x) => x.path === f.file);
+    if (!file) return "";
+    if (!cache2.has(f.file)) cache2.set(f.file, file.content ? file.content.split(/\r?\n/) : null);
+    const lines = cache2.get(f.file);
+    return (lines ? lines[f.line - 1] : file.addedLines.find((l) => l.line === f.line)?.text) ?? "";
+  };
+}
+function evaluateGate(findings, gate) {
+  if (!gate) return void 0;
+  const reasons = [];
+  const count = (risk) => findings.filter((f) => !f.blocking && f.risk === risk).length;
+  const blocking = findings.filter((f) => f.blocking).length;
+  if (blocking) reasons.push(`${blocking} finding${blocking > 1 ? "s" : ""} the team set to block`);
+  for (const risk of ["high", "medium", "low"]) {
+    const max = gate.maxNew?.[risk];
+    const n = count(risk);
+    if (max !== void 0 && n > max) reasons.push(`${n} new ${risk}-risk issue${n > 1 ? "s" : ""} (max ${max})`);
+  }
+  if (gate.requireTests && findings.some((f) => f.kind === "Tests" && /No test/.test(f.message))) reasons.push("code changed without a test");
+  return { passed: reasons.length === 0, reasons };
+}
+function gateLine(g) {
+  if (!g) return void 0;
+  return g.passed ? "\u2705 **Gate passed**" : `\u274C **Gate failed:** ${g.reasons.join(" \xB7 ")}`;
+}
+
 // src/analytics.ts
 var LATE_SOURCES = ["pr", "ci"];
 function ruleHealth(input) {
@@ -2439,6 +2492,7 @@ function reviewChange(changes, policy, opts = {}) {
 }
 export {
   AGENT_CONTEXT_TARGETS,
+  BASELINE_FILE,
   BUILTIN_PACKS,
   BUILTIN_REDACT,
   CONTEXT_BEGIN,
@@ -2459,6 +2513,7 @@ export {
   anyDetail,
   applicableRules,
   asksQuestion,
+  baselineKey,
   blankCode,
   bold,
   briefNextStep,
@@ -2470,6 +2525,7 @@ export {
   classify,
   concreteTestPath,
   containsCode,
+  createBaseline,
   cyan,
   detectSmell,
   dim,
@@ -2477,11 +2533,13 @@ export {
   draftRuleFromReview,
   effectiveRules,
   evaluate,
+  evaluateGate,
   exportedFunctions,
   fileAsChange,
   findingToMarkdown,
   formatFinding,
   formatReport,
+  gateLine,
   globToRegExp,
   green,
   groupFindings,
@@ -2490,6 +2548,7 @@ export {
   isTestPath,
   kataSuggestions,
   ladderFor,
+  lineTextFrom,
   mask,
   matchGlob,
   median,
@@ -2499,6 +2558,7 @@ export {
   nextPractice,
   normalizePath,
   onChangedLines,
+  parseBaseline,
   parseBriefMarkdown,
   parseDeny,
   parsePolicy,
@@ -2535,5 +2595,6 @@ export {
   validatePolicy,
   weeklyReport,
   weeklyReportToMarkdown,
+  withoutBaseline,
   yellow
 };

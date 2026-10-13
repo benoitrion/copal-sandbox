@@ -10,6 +10,8 @@ export interface ChangeSet {
   policyText?: string;
   /** `.copal/brief.md` at the head, when the repository has one. */
   briefText?: string;
+  /** `.copal/baseline.json`: findings already in the code when the team adopted Copal. */
+  baselineText?: string;
   ref: string;
 }
 
@@ -118,7 +120,7 @@ export class GitHubProvider implements GitProvider {
       }
     };
     const files = await mapLimit(parseUnifiedDiff(diff), 6, async (f) => ({ ...f, content: f.status === "deleted" ? undefined : await read(f.path) }));
-    return { files, headSha: sha, title: pr.title, author: pr.user?.login ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), ref: `${this.repo}#${this.number}` };
+    return { files, headSha: sha, title: pr.title, author: pr.user?.login ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), baselineText: await read(".copal/baseline.json"), ref: `${this.repo}#${this.number}` };
   }
 
   async commits(): Promise<{ sha: string; files: string[] }[]> {
@@ -233,7 +235,7 @@ export class GitLabProvider implements GitProvider {
       .map((c) => `diff --git a/${c.old_path} b/${c.new_path}\n${c.new_file ? "new file mode 100644\n" : ""}${c.deleted_file ? "deleted file mode 100644\n" : ""}--- ${c.new_file ? "/dev/null" : "a/" + c.old_path}\n+++ ${c.deleted_file ? "/dev/null" : "b/" + c.new_path}\n${c.diff}`)
       .join("\n");
     const files = await mapLimit(parseUnifiedDiff(diff), 6, async (f) => ({ ...f, content: f.status === "deleted" ? undefined : await read(f.path) }));
-    return { files, headSha: sha, title: mr.title, author: mr.author?.username ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), ref: this.label };
+    return { files, headSha: sha, title: mr.title, author: mr.author?.username ?? "unknown", policyText: await read(".copalrules"), briefText: await read(".copal/brief.md"), baselineText: await read(".copal/baseline.json"), ref: this.label };
   }
 
   async commits(): Promise<{ sha: string; files: string[] }[]> {

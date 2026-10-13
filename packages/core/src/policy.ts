@@ -366,6 +366,7 @@ function normalize(raw: unknown, origin: string): Policy {
     mode: o.mode as PolicyMode | undefined,
     navigator: (o.navigator as Policy["navigator"]) ?? undefined,
     risk: toArr(o.risk),
+    ...(o.gate && typeof o.gate === "object" ? { gate: o.gate as Policy["gate"] } : {}),
     extends: ext === undefined || ext === null ? [] : Array.isArray(ext) ? (ext as string[]) : [String(ext)],
     rules: ((o.rules as Rule[]) ?? []).map((r) => normalizeRule({ ...r, paths: toArr(r.paths), exclude: toArr(r.exclude), sources: toArr(r.sources) })),
     redact: (o.redact as RedactPattern[]) ?? [],
@@ -409,6 +410,7 @@ export function mergePolicies(parent: Policy, child: Policy): Policy {
     navigator: child.navigator ?? parent.navigator,
     risk: [...new Set([...(parent.risk ?? []), ...(child.risk ?? [])])],
     rules: [...byId.values()],
+    ...(child.gate ?? parent.gate ? { gate: child.gate ?? parent.gate } : {}),
     redact: [...(parent.redact ?? []), ...(child.redact ?? [])],
     environments: envs,
   };

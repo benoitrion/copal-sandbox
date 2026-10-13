@@ -24,6 +24,10 @@ import {
   reviewChange,
   ReviewCard,
   ScopeItem,
+  BASELINE_FILE,
+  lineTextFrom,
+  parseBaseline,
+  withoutBaseline,
 } from "@copal/core";
 
 /**
@@ -89,6 +93,14 @@ function check(doc: vscode.TextDocument) {
   // Only code changed since the last commit gets hints (like "clean as you code"); untouched code stays quiet.
   const changed = cfg().hints === "all" ? null : changedLines(p.root, rel, doc.getText());
   const keep = onChangedLines(full.findings.filter((f) => !p.policy.rules.find((r) => r.id === f.ruleId)?.changeSize), p.policy, rel, changed).filter((f) => !memento?.get(dismissKey(f.ruleId, doc.uri.fsPath, doc.lineAt(Math.max(f.line - 1, 0)).text)));
+  // Baseline: findings already in the code when the team adopted Copal stay quiet.
+  try {
+    const b = parseBaseline(fs.readFileSync(path.join(p.root, BASELINE_FILE), "utf8"));
+    const kept = withoutBaseline(keep, b, lineTextFrom([fileAsChange(rel, doc.getText())]));
+    keep.splice(0, keep.length, ...kept);
+  } catch {
+    /* no baseline */
+  }
   // Quiet by default: medium and high risk only, at most a few per file, riskiest first (blocking always shown).
   const RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const floor = RANK[cfg().minRisk] ?? 1;
