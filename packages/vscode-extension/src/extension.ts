@@ -42,7 +42,7 @@ const heartbeats: { file: string; ts: number; editor: string }[] = [];
 
 function cfg() {
   const c = vscode.workspace.getConfiguration("copal");
-  return { serverUrl: c.get<string>("serverUrl", ""), environment: c.get<string>("environment", "local"), checkOnSave: c.get<boolean>("checkOnSave", true), hints: c.get<string>("hints", "changed") };
+  return { serverUrl: c.get<string>("serverUrl", ""), environment: c.get<string>("environment", "local"), checkOnSave: c.get<boolean>("checkOnSave", true), hints: c.get<string>("hints", "changed"), minRisk: c.get<string>("minRisk", "medium"), maxHints: c.get<number>("maxHintsPerFile", 3) };
 }
 
 function policyFor(doc: vscode.TextDocument): { policy: Policy; root: string } | null {
@@ -62,7 +62,7 @@ function toDiagnostic(doc: vscode.TextDocument, f: Finding): vscode.Diagnostic {
   const end = f.endColumn ? f.endColumn - 1 : text.length;
   const d = new vscode.Diagnostic(
     new vscode.Range(line, start, line, Math.max(end, start + 1)),
-    f.coach?.question ?? f.message,
+    hintCard(f).question ?? hintCard(f).signal,
     // Coaching is a conversation, not an error: only rules the team set to block get a red squiggle.
     f.blocking ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Information,
   );
@@ -89,6 +89,14 @@ function check(doc: vscode.TextDocument) {
   // Only code changed since the last commit gets hints (like "clean as you code"); untouched code stays quiet.
   const changed = cfg().hints === "all" ? null : changedLines(p.root, rel, doc.getText());
   const keep = onChangedLines(full.findings.filter((f) => !p.policy.rules.find((r) => r.id === f.ruleId)?.changeSize), p.policy, rel, changed).filter((f) => !memento?.get(dismissKey(f.ruleId, doc.uri.fsPath, doc.lineAt(Math.max(f.line - 1, 0)).text)));
+  // Quiet by default: medium and high risk only, at most a few per file, riskiest first (blocking always shown).
+  const RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const floor = RANK[cfg().minRisk] ?? 1;
+  const shown = keep
+    .filter((f) => f.blocking || (RANK[f.risk ?? "low"] ?? 2) <= floor)
+    .sort((a, b) => Number(b.blocking) - Number(a.blocking) || (RANK[a.risk ?? "low"] ?? 2) - (RANK[b.risk ?? "low"] ?? 2) || a.line - b.line)
+    .slice(0, Math.max(1, cfg().maxHints));
+  keep.splice(0, keep.length, ...shown.sort((a, b) => a.line - b.line));
   const report = { ...full, findings: keep, blocking: keep.some((f) => f.blocking), summary: { ...full.summary, total: keep.length, blocking: keep.filter((f) => f.blocking).length, audit: keep.filter((f) => !f.blocking).length } };
   policyOf.set(doc.uri.toString(), p.policy);
   findingsByUri.set(doc.uri.toString(), report.findings);
@@ -174,7 +182,8 @@ export function hintCardMarkdown(f: Finding, uri: string, policy?: Policy): stri
   const c = hintCard(f);
   const ref: FindingRef = { uri, ruleId: f.ruleId, line: f.line };
   // VS Code prints the diagnostic (the question) right above this card: don't say it twice.
-  const out = [c.question ? c.signal : c.why ? `*${c.why}*` : ""];
+  // Decisions: the question is the diagnostic, the card adds the fact. Mechanical issues: the fact is the diagnostic, the card says what to do.
+  const out = [c.question ? `${c.signal}${c.why ? ` · *${c.why}*` : ""}` : c.fix && !/\n/.test(c.fix) ? c.fix : c.why ? `*${c.why}*` : ""];
   const rule = policy?.rules.find((r) => r.id === f.ruleId);
   const links = [
     rule?.requireTest ? cmdLink("Create the test", "copal.createTest", ref) : "",

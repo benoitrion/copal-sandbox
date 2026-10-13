@@ -139,6 +139,8 @@ export interface Finding {
     column?: number;
     endColumn?: number;
     message: string;
+    /** What this occurrence is about, in this code (names, fields, branches). Shown instead of the generic message. */
+    detail?: string;
     why?: string;
     suggestion?: Suggestion;
     /** Level-4 fix described in words (v4 string `fix`). */

@@ -349,6 +349,9 @@ var HINT_LEVELS = {
   3: "worked-example",
   4: "fix"
 };
+function asksQuestion(f) {
+  return f.blocking || !f.kind || ["Architecture", "Dependencies", "Security", "Change size"].includes(f.kind);
+}
 function hintCard(f) {
   const c2 = f.coach ?? {};
   const fix = f.suggestion ? f.suggestion.replacement.trim() : f.fixText;
@@ -356,8 +359,8 @@ function hintCard(f) {
     ruleId: f.ruleId,
     title: `${f.ruleId} \xB7 ${f.category}`,
     location: `${f.file}:${f.line}`,
-    signal: f.message,
-    question: c2.question,
+    signal: f.detail ?? f.message,
+    question: asksQuestion(f) ? c2.question : void 0,
     why: f.why,
     reference: c2.reference,
     example: c2.example,
@@ -1071,6 +1074,48 @@ function fileAsChange(path, content) {
   };
 }
 
+// src/detail.ts
+function anyDetail(lineText, content) {
+  const m = /(\w+)\s*\??:\s*any\b/.exec(lineText);
+  const fnReturn = !m && /\)\s*:\s*any\b/.test(lineText);
+  if (fnReturn) return { detail: "This function returns `any`: callers lose type checking", fix: "Return a named type, or `unknown` if callers must check it." };
+  if (!m) return void 0;
+  const name = m[1];
+  const fields = content ? [...new Set([...content.matchAll(new RegExp(`\\b${name}\\??\\.(\\w+)`, "g"))].map((x) => x[1]))].filter((f) => !/^(length|map|forEach|filter|push|then)$/.test(f)).slice(0, 5) : [];
+  if (!fields.length) return { detail: `\`${name}\` is \`any\`: nothing checks how it is used`, fix: `Type \`${name}\`, or use \`unknown\` and check it before use.` };
+  const shape = `{ ${fields.map((f) => `${f}: \u2026`).join("; ")} }`;
+  return { detail: `\`${name}\` is \`any\` but the code reads ${fields.map((f) => `.${f}`).join(", ")}`, fix: `Type it: \`${name}: ${shape}\`` };
+}
+function exportedFunctions(content) {
+  const lines = content.split(/\r?\n/);
+  const out = [];
+  lines.forEach((l, i) => {
+    const m = /export\s+(?:default\s+)?(?:async\s+)?function\s+(\w+)|export\s+const\s+(\w+)\s*=\s*(?:async\s*)?\(/.exec(l);
+    if (!m) return;
+    let depth = 0, started = false, branches = 0;
+    for (let j = i; j < lines.length; j++) {
+      const t = lines[j].replace(/(["'`]).*?\1/g, "");
+      branches += (t.match(/\bif\s*\(|\bcase\b|\?[^.?:]|&&|\|\|/g) ?? []).length;
+      for (const ch of t) {
+        if (ch === "{") depth++, started = true;
+        if (ch === "}") depth--;
+      }
+      if (started && depth <= 0) break;
+    }
+    out.push({ name: m[1] ?? m[2], branches });
+  });
+  return out;
+}
+function testDetail(fileName, content) {
+  if (!content) return void 0;
+  const fns = exportedFunctions(content);
+  if (!fns.length) return void 0;
+  const top = [...fns].sort((a, b) => b.branches - a.branches);
+  const cases = (n) => n ? `${n + 1} cases` : "1 case";
+  if (fns.length === 1) return `\`${fns[0].name}\` has ${cases(fns[0].branches)} and no test`;
+  return `${fns.length} functions in ${fileName} and no test; start with \`${top[0].name}\` (${cases(top[0].branches)})`;
+}
+
 // src/posix.ts
 function normalize2(p) {
   const abs = p.startsWith("/");
@@ -1530,6 +1575,10 @@ function checkPattern(rule, file) {
     const f = base(rule, file.path, line, `Matches forbidden pattern of rule ${rule.id}`, "quality", "warning");
     f.column = m.index + 1;
     f.endColumn = m.index + m[0].length + 1;
+    if (/\bany\b/.test(rule.pattern)) {
+      const d = anyDetail(text, file.content ?? file.addedLines.map((l) => l.text).join("\n"));
+      if (d) Object.assign(f, { detail: d.detail }, d.fix && !f.fixText ? { fixText: d.fix } : {});
+    }
     if (rule.fix && typeof rule.fix === "object") {
       const fixRx = new RegExp(rule.fix.replace ?? rule.pattern, flags);
       const replacement = text.replace(fixRx, rule.fix.with);
@@ -1612,7 +1661,10 @@ function checkRequireTest(rule, files) {
     const name = basename(file.path).replace(/\.[^.]+$/, "");
     const expected = rule.requireTest.test.replace(/\{dir\}/g, dir).replace(/\{name\}/g, name);
     if (!files.some((f) => matchGlob(f.path, expected))) {
-      out.push(base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning"));
+      const f = base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning");
+      const d = testDetail(basename(file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
+      if (d) f.detail = `${d}: ${concreteTestPath(expected, file.path)}`;
+      out.push(f);
     }
   }
   return out;
@@ -1772,7 +1824,8 @@ function reportToMarkdown(r, title = "Copal check") {
     const where = `\`${f.file}:${f.line}\`${files.length > 1 ? ` and ${files.length - 1} other file${files.length > 2 ? "s" : ""}` : ""}${g.length > 1 ? ` \xB7 ${g.length}\xD7` : ""}`;
     out.push(`${i + 1}. ${risk}${f.kind ? ` \xB7 ${f.kind}` : ""} \u2014 **${f.message}**`, `   ${where}`);
     if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication")) out.push(`   Suggestion: ${f.fixText}`);
-    else if (f.coach?.question) out.push(`   _${f.coach.question}_`);
+    else if (hintCard(f).question) out.push(`   _${hintCard(f).question}_`);
+    else if (g.length === 1 && f.detail) out.push(`   ${f.detail}`);
   });
   if (groups.length > TOP) out.push("", `<sub>+${groups.length - TOP} lower-risk rule${groups.length - TOP > 1 ? "s" : ""} (${groups.slice(TOP).reduce((n, g) => n + g.length, 0)} findings) in the inline comments.</sub>`);
   out.push("", "<sub>Not relevant? Reply `/copal false-positive <rule-id>`.</sub>");
@@ -1781,7 +1834,7 @@ function reportToMarkdown(r, title = "Copal check") {
 function findingToMarkdown(f, opts = {}) {
   const card = hintCard(f);
   const risk = f.blocking ? "\u26D4 Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
-  const out = [`**${card.question ?? f.message}**`, "", card.question ? `${f.message}${f.why ? ` \xB7 _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
+  const out = [`**${card.question ?? card.signal}**`, "", card.question ? `${card.signal}${f.why ? ` \xB7 _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
   if (f.suggestion && !f.coach) out.push("", "```suggestion", f.suggestion.replacement, "```");
   else if (card.fix) out.push("", `<details><summary>Show me</summary>
 
@@ -2403,7 +2456,9 @@ export {
   TRACKS,
   YamlError,
   agentContextBlock,
+  anyDetail,
   applicableRules,
+  asksQuestion,
   blankCode,
   bold,
   briefNextStep,
@@ -2422,6 +2477,7 @@ export {
   draftRuleFromReview,
   effectiveRules,
   evaluate,
+  exportedFunctions,
   fileAsChange,
   findingToMarkdown,
   formatFinding,
@@ -2472,6 +2528,7 @@ export {
   scopeCheck,
   startingPractice,
   taskScope,
+  testDetail,
   testOrderFindings,
   toYaml,
   trackRank,

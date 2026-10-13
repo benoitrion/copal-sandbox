@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { classify, detectSmell, evaluate, fileAsChange, parsePolicy, reportToMarkdown, resolvePolicy } from "../src";
+import { classify, hintCard, detectSmell, evaluate, fileAsChange, parsePolicy, reportToMarkdown, resolvePolicy } from "../src";
 
 const segs = ["retail", "wholesale", "partner", "public"];
 const dup = segs.map((s) => `export function discount_${s}(order: Order) {\n  let total = 0;\n  for (const line of order.lines) {\n    total += line.amount * line.qty;\n  }\n  if (order.segment === "${s}") {\n    total = total * 0.9;\n  }\n  return total;\n}\n`).join("\n");
@@ -34,4 +34,13 @@ test("every finding carries a risk and a family; the PR comment ranks by risk an
   assert.ok(md.indexOf("🔴 High") < md.indexOf("🟠 Medium"));
   assert.match(md, /Suggestion: It is repeated in/);
   assert.deepEqual(classify({ id: "x", pattern: "x", risk: "low", kind: "Tests" }, "security", "error", true), { risk: "low", kind: "Tests" });
+});
+
+test("hints say something about this code: the fields an `any` value uses, the untested function and its cases", () => {
+  const { anyDetail, testDetail } = require("../src/detail");
+  const code = "export function createCreditNote(original: any) {\n  if (original.total > 0) return original.id;\n  return null;\n}";
+  assert.deepEqual(anyDetail("export function createCreditNote(original: any) {", code), { detail: "`original` is `any` but the code reads .total, .id", fix: "Type it: `original: { total: …; id: … }`" });
+  assert.equal(testDetail("credit-note.ts", code), "`createCreditNote` has 2 cases and no test");
+  assert.equal(hintCard({ ruleId: "no-explicit-any", kind: "Best practice", message: "m", coach: { question: "q?" } } as never).question, undefined, "mechanical: no question");
+  assert.equal(hintCard({ ruleId: "ui-no-persistence", kind: "Architecture", message: "m", coach: { question: "q?" } } as never).question, "q?", "a team decision: asked");
 });

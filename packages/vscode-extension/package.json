@@ -97,6 +97,21 @@
           ],
           "default": "changed",
           "description": "Show hints on code changed since the last commit only (default), or on all code."
+        },
+        "copal.minRisk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "medium",
+          "description": "Lowest risk shown as a hint in the editor. Lower-risk findings stay in Review my change and the team report."
+        },
+        "copal.maxHintsPerFile": {
+          "type": "number",
+          "default": 3,
+          "description": "At most this many hints per file, the riskiest first."
         }
       }
     }

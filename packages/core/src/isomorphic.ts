@@ -11,6 +11,7 @@ export * from "./engine";
 export * from "./format";
 export * from "./coach";
 export * from "./smells";
+export * from "./detail";
 export * from "./analytics";
 export * from "./weekly";
 export * from "./ladder";

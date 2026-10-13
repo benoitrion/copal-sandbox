@@ -1,3 +1,4 @@
+import { anyDetail, testDetail } from "./detail";
 import * as posix from "./posix";
 import { inScope, matchGlob, normalizePath } from "./glob";
 import { BUILTIN_REDACT, effectiveRules } from "./policy";
@@ -153,6 +154,10 @@ function checkPattern(rule: Rule, file: FileChange): Finding[] {
     const f = base(rule, file.path, line, `Matches forbidden pattern of rule ${rule.id}`, "quality", "warning");
     f.column = m.index + 1;
     f.endColumn = m.index + m[0].length + 1;
+    if (/\bany\b/.test(rule.pattern!)) {
+      const d = anyDetail(text, file.content ?? file.addedLines.map((l) => l.text).join("\n"));
+      if (d) Object.assign(f, { detail: d.detail }, d.fix && !f.fixText ? { fixText: d.fix } : {});
+    }
     if (rule.fix && typeof rule.fix === "object") {
       const fixRx = new RegExp(rule.fix.replace ?? rule.pattern!, flags);
       const replacement = text.replace(fixRx, rule.fix.with);
@@ -248,7 +253,10 @@ function checkRequireTest(rule: Rule, files: FileChange[]): Finding[] {
     const name = posix.basename(file.path).replace(/\.[^.]+$/, "");
     const expected = rule.requireTest!.test.replace(/\{dir\}/g, dir).replace(/\{name\}/g, name);
     if (!files.some((f) => matchGlob(f.path, expected))) {
-      out.push(base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${posix.basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning"));
+      const f = base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${posix.basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning");
+      const d = testDetail(posix.basename(file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
+      if (d) f.detail = `${d}: ${concreteTestPath(expected, file.path)}`;
+      out.push(f);
     }
   }
   return out;

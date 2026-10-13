@@ -255,7 +255,7 @@ test("Review my change: scenario 01 in a git repo → panel with three hint card
   assert.ok(panel, "a panel opens");
   const html: string = panel.webview.html;
   for (const id of ["ledger-rounding", "invoice-contract-test", "hardcoded-credentials"]) assert.ok(html.includes(id), id);
-  for (const label of ["Ask me", "Explain", "Show me"]) assert.equal(html.split(`>${label}</button>`).length - 1, 3, label);
+  for (const label of ["Ask me", "Explain", "Show me"]) assert.equal(html.split(`>${label}</button>`).length - 1, label === "Ask me" ? 2 : 3, label);
 
   panel.onMessage({ command: "copal.explain", ruleId: "ledger-rounding", file: "src/invoice/total.ts", line: 8 });
   const call = executed.find((e) => e.name === "copal.explain")!;

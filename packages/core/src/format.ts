@@ -83,7 +83,8 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
     const where = `\`${f.file}:${f.line}\`${files.length > 1 ? ` and ${files.length - 1} other file${files.length > 2 ? "s" : ""}` : ""}${g.length > 1 ? ` · ${g.length}×` : ""}`;
     out.push(`${i + 1}. ${risk}${f.kind ? ` · ${f.kind}` : ""} — **${f.message}**`, `   ${where}`);
     if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication")) out.push(`   Suggestion: ${f.fixText}`);
-    else if (f.coach?.question) out.push(`   _${f.coach.question}_`);
+    else if (hintCard(f).question) out.push(`   _${hintCard(f).question}_`);
+    else if (g.length === 1 && f.detail) out.push(`   ${f.detail}`);
   });
   if (groups.length > TOP) out.push("", `<sub>+${groups.length - TOP} lower-risk rule${groups.length - TOP > 1 ? "s" : ""} (${groups.slice(TOP).reduce((n, g) => n + g.length, 0)} findings) in the inline comments.</sub>`);
   out.push("", "<sub>Not relevant? Reply `/copal false-positive <rule-id>`.</sub>");
@@ -98,7 +99,7 @@ export function findingToMarkdown(f: Finding, opts: { referenceBase?: string } =
   // Same shape as the editor hint: the question, one line of signal and why, the fix folded, a small footer.
   const card = hintCard(f);
   const risk = f.blocking ? "⛔ Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
-  const out = [`**${card.question ?? f.message}**`, "", card.question ? `${f.message}${f.why ? ` · _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
+  const out = [`**${card.question ?? card.signal}**`, "", card.question ? `${card.signal}${f.why ? ` · _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
   if (f.suggestion && !f.coach) out.push("", "```suggestion", f.suggestion.replacement, "```");
   else if (card.fix) out.push("", `<details><summary>Show me</summary>\n\n\`\`\`\n${card.fix}\n\`\`\`\n\n</details>`);
   const ref = card.reference ? ` · ${referenceLink(card.reference, opts.referenceBase)}` : "";

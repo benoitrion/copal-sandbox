@@ -48,6 +48,14 @@ export interface HintCard {
 }
 
 /** Build the hint card every surface renders (IDE hover, CLI, PR comment, agent reply). */
+/**
+ * Questions where judgment matters, answers where it doesn't: architecture, dependencies, security, scope and size are
+ * team decisions, so Copal asks. Mechanical issues (a type, a log line, a missing test) are stated and fixed.
+ */
+export function asksQuestion(f: Pick<Finding, "kind" | "blocking">): boolean {
+  return f.blocking || !f.kind || ["Architecture", "Dependencies", "Security", "Change size"].includes(f.kind);
+}
+
 export function hintCard(f: Finding): HintCard {
   const c = f.coach ?? {};
   const fix = f.suggestion ? f.suggestion.replacement.trim() : f.fixText;
@@ -55,8 +63,8 @@ export function hintCard(f: Finding): HintCard {
     ruleId: f.ruleId,
     title: `${f.ruleId} · ${f.category}`,
     location: `${f.file}:${f.line}`,
-    signal: f.message,
-    question: c.question,
+    signal: f.detail ?? f.message,
+    question: asksQuestion(f) ? c.question : undefined,
     why: f.why,
     reference: c.reference,
     example: c.example,

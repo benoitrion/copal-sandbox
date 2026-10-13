@@ -12,7 +12,8 @@ test("Review my change on billing-api scenario 01: three hint cards with Ask me 
   const r = reviewChange([total()], policy);
   assert.deepEqual(r.cards.map((c) => c.ruleId).sort(), ["hardcoded-credentials", "invoice-contract-test", "ledger-rounding"]);
   for (const c of r.cards as { ruleId: string; actions: string[]; markdown: string; file: string; line: number }[]) {
-    assert.deepEqual(c.actions, ["Ask me", "Explain", "Show me"], c.ruleId);
+    // Questions only where the team decides: the missing test is stated, not asked.
+    assert.deepEqual(c.actions, c.ruleId === "invoice-contract-test" ? ["Explain", "Show me"] : ["Ask me", "Explain", "Show me"], c.ruleId);
     assert.ok(c.markdown.includes(`\`${c.ruleId}\``), "same format as the PR comment");
     assert.ok(c.file && c.line > 0);
   }
