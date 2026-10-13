@@ -11,6 +11,9 @@ inputs:
   days:
     description: "Readiness only: how many days of history to read"
     default: "90"
+  sarif:
+    description: "Check mode: SARIF files from scanners you already run (CodeQL, Semgrep, ESLint…), comma-separated. Their findings join Copal's ranking, baseline and gate."
+    default: ""
   report-label:
     description: "Label of the GitHub issue that holds each report"
     default: copal-report
@@ -35,6 +38,7 @@ runs:
         TRACK: ${{ inputs.track }}
         DAYS: ${{ inputs.days }}
         LABEL: ${{ inputs.report-label }}
+        COPAL_SARIF: ${{ inputs.sarif }}
         GH_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
       run: bash "$COPAL/actions/program/run.sh"

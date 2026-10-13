@@ -14,6 +14,7 @@ export * from "./smells";
 export * from "./detail";
 export * from "./baseline";
 export * from "./split";
+export * from "./sarif";
 export * from "./analytics";
 export * from "./weekly";
 export * from "./ladder";

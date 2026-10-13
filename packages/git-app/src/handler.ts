@@ -1,6 +1,6 @@
 import * as crypto from "node:crypto";
 import { CopalClient } from "@copal/client";
-import { evaluateGate, gateLine, lineTextFrom, parseBaseline, withoutBaseline, parsePolicy, reportToMarkdown, resolvePolicy, reviewerGuide, reviewerGuideToMarkdown, scopeCheck, testOrderFindings } from "@copal/core";
+import { findingsFromSarif, evaluateGate, gateLine, lineTextFrom, parseBaseline, withoutBaseline, parsePolicy, reportToMarkdown, resolvePolicy, reviewerGuide, reviewerGuideToMarkdown, scopeCheck, testOrderFindings } from "@copal/core";
 import { GitHubProvider, githubConfigFromEnv, GitLabProvider, gitlabConfigFromEnv, GitProvider, ChangeSet } from "./providers";
 import { COMMAND_RX, runCommand } from "./commands";
 
@@ -63,6 +63,16 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
         }
       } catch (e) {
         log(`${provider.label}: commit order unavailable (${(e as Error).message})`);
+      }
+    }
+    // Scanner results (SARIF) the team already runs, on the lines this change adds.
+    for (const file of (process.env.COPAL_SARIF ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+      try {
+        const extra = findingsFromSarif(JSON.parse(require("node:fs").readFileSync(file, "utf8")), cs.files);
+        result.findings.push(...extra);
+        result.summary = { ...result.summary, total: result.summary.total + extra.length, audit: result.summary.audit + extra.length };
+      } catch (e) {
+        log(`${provider.label}: cannot read SARIF ${file} (${(e as Error).message})`);
       }
     }
     // Baseline: what was already in the code stays quiet; the review and the gate speak about this change only.

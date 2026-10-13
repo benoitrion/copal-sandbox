@@ -65,3 +65,14 @@ test("a change over budget comes with a split: rule and tests first, then wiring
   const steps = splitPlan([f("src/pricing/discount.ts", 80), f("src/pricing/discount.test.ts", 40), f("src/api/orders.ts", 130), f("src/ui/CheckoutPage.tsx", 200), f("README.md", 5)]);
   assert.deepEqual(steps.map((s: { title: string; files: string[] }) => [s.title, s.files.length]), [["Rule and its tests", 2], ["Wiring", 1], ["Screen", 1], ["Docs and config", 1]]);
 });
+
+test("scanner results (SARIF) become ranked findings on the lines the change adds", () => {
+  const { findingsFromSarif } = require("../src/sarif");
+  const sarif = { runs: [{ tool: { driver: { name: "CodeQL", rules: [{ id: "js/sql-injection", properties: { tags: ["security"], "security-severity": "8.8" } }] } }, results: [
+    { ruleId: "js/sql-injection", level: "error", message: { text: "Query built from user input" }, locations: [{ physicalLocation: { artifactLocation: { uri: "src/db.ts" }, region: { startLine: 4 } } }] },
+    { ruleId: "js/sql-injection", level: "error", message: { text: "old" }, locations: [{ physicalLocation: { artifactLocation: { uri: "src/db.ts" }, region: { startLine: 40 } } }] },
+  ] }] };
+  const f = findingsFromSarif(sarif, [{ path: "src/db.ts", addedLines: [{ line: 4 }] }]);
+  assert.equal(f.length, 1, "only the changed line");
+  assert.deepEqual([f[0].ruleId, f[0].risk, f[0].kind], ["codeql/js/sql-injection", "high", "Security"]);
+});

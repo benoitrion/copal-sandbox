@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow, weeklyReport, weeklyReportToMarkdown, changedLineSet, onChangedLines, practice, PullRecord, DeploymentRecord, IncidentRecord, BASELINE_FILE, createBaseline, evaluateGate, lineTextFrom, parseBaseline, withoutBaseline } from "@copal/core";
+import { agentContextBlock, AGENT_CONTEXT_TARGETS, applicableRules, bold, mergeManagedBlock, briefToText, briefToMarkdown, AgentBrief, cyan, dim, evaluate, fileAsChange, FileChange, Finding, formatReport, green, requestCheckContext, requestCheckEvent, scopeCheck, testOrderFindings, reviewChange, red, redact, rulesToGuidance, yellow, weeklyReport, weeklyReportToMarkdown, changedLineSet, onChangedLines, practice, PullRecord, DeploymentRecord, IncidentRecord, BASELINE_FILE, createBaseline, findingsFromSarif, evaluateGate, lineTextFrom, parseBaseline, withoutBaseline } from "@copal/core";
 import { CoachEvent, CopalClient, loadConfig, loadRepoPolicy, saveConfig, CONFIG_FILE } from "@copal/client";
 import { allTrackedFiles, author, branchChanges, git, repoRoot, stagedChanges, currentRef, defaultBase, worktreeChanges, branchCommits } from "./git";
 
@@ -12,6 +12,7 @@ Usage:
   copal status                                            Workspace state from the Copal server
   copal check [--staged|--base REF|--all|--diff FILE]     Validate changes against .copalrules
   copal check --stdin-file PATH --json [--all-lines]      Check unsaved editor content (stdin) as PATH; changed lines only unless --all-lines
+  copal check --base REF --sarif FILE                     Add a scanner's SARIF results (CodeQL, Semgrep, ESLint…), on changed lines only
   copal check --base REF --gate                           Fail when the change does not pass the .copalrules gate
   copal baseline                                           Record current findings in .copal/baseline.json: only new ones show from now on
              [--env ENV] [--json] [--show-me] [--fix] [--audit] [--local]
@@ -128,6 +129,13 @@ async function check(flags: Flags): Promise<number> {
     }
   }
 
+  // Scanner results (SARIF) a team already runs: same ranking, baseline and gate as Copal's own findings.
+  for (const f of ([] as string[]).concat((flags.sarif as never) ?? []).filter((x) => typeof x === "string")) {
+    const extra = findingsFromSarif(JSON.parse(fs.readFileSync(f, "utf8")), flags.all ? undefined : files);
+    result.findings.push(...extra);
+    result.summary.total += extra.length;
+    result.summary.audit += extra.length;
+  }
   // Baseline: findings already in the code when the team adopted Copal stay quiet.
   quietBaseline(result, files, root);
   const gate = evaluateGate(result.findings, repo.policy.gate);
