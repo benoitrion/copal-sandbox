@@ -82,7 +82,7 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
     const files = [...new Set(g.map((x) => x.file))];
     const where = `\`${f.file}:${f.line}\`${files.length > 1 ? ` and ${files.length - 1} other file${files.length > 2 ? "s" : ""}` : ""}${g.length > 1 ? ` · ${g.length}×` : ""}`;
     out.push(`${i + 1}. ${risk}${f.kind ? ` · ${f.kind}` : ""} — **${f.message}**`, `   ${where}`);
-    if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication")) out.push(`   Suggestion: ${f.fixText}`);
+    if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication" || f.kind === "Change size")) out.push(`   Suggestion: ${f.fixText.replace(/\n/g, "\n   ")}`);
     else if (hintCard(f).question) out.push(`   _${hintCard(f).question}_`);
     else if (g.length === 1 && f.detail) out.push(`   ${f.detail}`);
   });

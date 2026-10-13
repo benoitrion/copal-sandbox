@@ -58,3 +58,10 @@ test("baseline keeps old findings quiet; the gate judges only what the change in
   assert.deepEqual(evaluateGate(fresh, { maxNew: { low: 0 } }), { passed: false, reasons: ["1 new low-risk issue (max 0)"] });
   assert.deepEqual(evaluateGate([], { maxNew: { high: 0 }, requireTests: true }), { passed: true, reasons: [] });
 });
+
+test("a change over budget comes with a split: rule and tests first, then wiring, then the screen", () => {
+  const { splitPlan } = require("../src/split");
+  const f = (path: string, n: number) => ({ path, status: "added", addedLines: Array.from({ length: n }, (_, i) => ({ line: i + 1, text: "x" })) });
+  const steps = splitPlan([f("src/pricing/discount.ts", 80), f("src/pricing/discount.test.ts", 40), f("src/api/orders.ts", 130), f("src/ui/CheckoutPage.tsx", 200), f("README.md", 5)]);
+  assert.deepEqual(steps.map((s: { title: string; files: string[] }) => [s.title, s.files.length]), [["Rule and its tests", 2], ["Wiring", 1], ["Screen", 1], ["Docs and config", 1]]);
+});

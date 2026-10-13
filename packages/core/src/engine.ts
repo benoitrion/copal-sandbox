@@ -1,4 +1,5 @@
 import { anyDetail, testDetail } from "./detail";
+import { splitPlan, splitPlanText } from "./split";
 import * as posix from "./posix";
 import { inScope, matchGlob, normalizePath } from "./glob";
 import { BUILTIN_REDACT, effectiveRules } from "./policy";
@@ -277,7 +278,13 @@ function checkChangeSize(rule: Rule, files: FileChange[]): Finding[] {
   if (maxFiles && size.files > maxFiles) over.push(`${size.files} files (budget ${maxFiles})`);
   if (!over.length) return [];
   const first = files.find((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude))!;
-  return [base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info")];
+  const f = base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info");
+  const steps = splitPlan(files.filter((x) => inScope(normalizePath(x.path), rule.paths, rule.exclude)));
+  if (steps.length > 1) {
+    f.detail = `${size.lines} lines in ${size.files} files; it splits into ${steps.length} changes`;
+    f.fixText = `Split it, each step reviewed and merged on its own:\n${splitPlanText(steps)}`;
+  }
+  return [f];
 }
 
 /**

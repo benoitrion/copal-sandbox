@@ -1118,6 +1118,32 @@ function testDetail(fileName, content) {
   return `${fns.length} functions in ${fileName} and no test; start with \`${top[0].name}\` (${cases(top[0].branches)})`;
 }
 
+// src/split.ts
+var LAYERS = [
+  { title: "Screen", rx: /(^|\/)(ui|components?|pages?|views?|screens?|frontend|web\/(?:pages|components))\/|\.(tsx|jsx|vue|svelte|css|scss|html)$/i },
+  { title: "Wiring", rx: /(^|\/)(api|web|routes?|controllers?|handlers?|persistence|repositor(y|ies)|db|migrations?|adapters?|infra|server)\/|(controller|route|repo|handler|server)\.[jt]s$/i },
+  { title: "Docs and config", rx: /\.(md|ya?ml|json|lock|toml|ini)$|(^|\/)(docs?|\.github)\//i }
+];
+var isTest = (p) => /\.(test|spec)\.[jt]sx?$|(^|\/)(__tests__|tests?)\//.test(p);
+var stem = (p) => p.replace(/^.*\//, "").replace(/\.(test|spec)(?=\.)/, "").replace(/\.[^.]+$/, "");
+function splitPlan(files) {
+  const groups = /* @__PURE__ */ new Map();
+  const order = ["Rule and its tests", "Wiring", "Screen", "Docs and config"];
+  for (const t of order) groups.set(t, { title: t, files: [], lines: 0 });
+  const layerOf = (p) => LAYERS.find((l) => l.rx.test(p))?.title ?? "Rule and its tests";
+  const codeLayer = new Map(files.filter((f) => !isTest(f.path)).map((f) => [stem(f.path), layerOf(f.path)]));
+  for (const f of files) {
+    const layer = isTest(f.path) ? codeLayer.get(stem(f.path)) ?? "Rule and its tests" : layerOf(f.path);
+    const g = groups.get(layer);
+    g.files.push(f.path);
+    g.lines += f.addedLines.length;
+  }
+  return order.map((t) => groups.get(t)).filter((g) => g.files.length);
+}
+function splitPlanText(steps) {
+  return steps.map((s, i) => `${i + 1}. ${s.title}: ${s.files.length} file${s.files.length > 1 ? "s" : ""}, ${s.lines} lines (${s.files.slice(0, 3).map((f) => f.replace(/^.*\//, "")).join(", ")}${s.files.length > 3 ? ", \u2026" : ""})`).join("\n");
+}
+
 // src/posix.ts
 function normalize2(p) {
   const abs = p.startsWith("/");
@@ -1656,9 +1682,9 @@ function checkSmell(rule, file) {
 }
 function checkRequireTest(rule, files) {
   const out = [];
-  const isTest = (p) => /\.(test|spec)\.[jt]sx?$/.test(p) || p.includes("/__tests__/");
+  const isTest2 = (p) => /\.(test|spec)\.[jt]sx?$/.test(p) || p.includes("/__tests__/");
   for (const file of files) {
-    if (isTest(file.path) || !inScope(file.path, rule.paths, rule.exclude)) continue;
+    if (isTest2(file.path) || !inScope(file.path, rule.paths, rule.exclude)) continue;
     const dir = dirname(file.path);
     const name = basename(file.path).replace(/\.[^.]+$/, "");
     const expected = rule.requireTest.test.replace(/\{dir\}/g, dir).replace(/\{name\}/g, name);
@@ -1682,8 +1708,15 @@ function checkChangeSize(rule, files) {
   if (maxLines && size.lines > maxLines) over.push(`${size.lines} lines (budget ${maxLines})`);
   if (maxFiles && size.files > maxFiles) over.push(`${size.files} files (budget ${maxFiles})`);
   if (!over.length) return [];
-  const first = files.find((f) => inScope(normalizePath(f.path), rule.paths, rule.exclude));
-  return [base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info")];
+  const first = files.find((f2) => inScope(normalizePath(f2.path), rule.paths, rule.exclude));
+  const f = base(rule, first.path, first.addedLines[0]?.line ?? 1, `This change is ${over.join(" and ")}: too big to verify in one step`, "quality", "info");
+  const steps = splitPlan(files.filter((x) => inScope(normalizePath(x.path), rule.paths, rule.exclude)));
+  if (steps.length > 1) {
+    f.detail = `${size.lines} lines in ${size.files} files; it splits into ${steps.length} changes`;
+    f.fixText = `Split it, each step reviewed and merged on its own:
+${splitPlanText(steps)}`;
+  }
+  return [f];
 }
 function concreteTestPath(expected, file) {
   const i = expected.indexOf("**");
@@ -1825,7 +1858,7 @@ function reportToMarkdown(r, title = "Copal check") {
     const files = [...new Set(g.map((x) => x.file))];
     const where = `\`${f.file}:${f.line}\`${files.length > 1 ? ` and ${files.length - 1} other file${files.length > 2 ? "s" : ""}` : ""}${g.length > 1 ? ` \xB7 ${g.length}\xD7` : ""}`;
     out.push(`${i + 1}. ${risk}${f.kind ? ` \xB7 ${f.kind}` : ""} \u2014 **${f.message}**`, `   ${where}`);
-    if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication")) out.push(`   Suggestion: ${f.fixText}`);
+    if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication" || f.kind === "Change size")) out.push(`   Suggestion: ${f.fixText.replace(/\n/g, "\n   ")}`);
     else if (hintCard(f).question) out.push(`   _${hintCard(f).question}_`);
     else if (g.length === 1 && f.detail) out.push(`   ${f.detail}`);
   });
@@ -2586,6 +2619,8 @@ export {
   rulesWithoutCoaching,
   scalar,
   scopeCheck,
+  splitPlan,
+  splitPlanText,
   startingPractice,
   taskScope,
   testDetail,
