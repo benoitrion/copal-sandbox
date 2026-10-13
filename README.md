@@ -297,3 +297,12 @@ Options : `--port 4010`, `--project dir1,dir2` (projets préchargés), `--persis
 - L'analyse d'import est textuelle (imports relatifs et paquets) ; les alias de `tsconfig` ne sont pas résolus.
 - L'extension VS Code compile contre un sous-ensemble local de l'API (`typings/vscode.d.ts`) ; installez `@types/vscode` et supprimez ce dossier pour développer plus loin.
 - Le plugin JetBrains est compilé et testé par la CI GitHub (le SDK IntelliJ n'est pas téléchargeable dans l'environnement où il a été écrit) ; il n'a pas encore été lancé dans un IDE réel.
+
+## Copal Skills for AI assistants
+
+Open-standard [Agent Skills](skills/) that teach an assistant your team's `.copalrules`: `copal-brief`, `copal-check`, `copal-review`, `copal-tune`.
+
+- **Claude Code:** `claude plugin marketplace add benoitrion/copal-sandbox` then `claude plugin install copal-skills@copal`
+- **VS Code / IntelliJ:** *Copal: Set up my AI assistant* copies them into `.claude/skills/` and `.agents/skills/`
+- **Codex and others:** copy `skills/` to `.agents/skills/` in your repository
+- **GitHub Copilot:** use [`AGENTS.md`](AGENTS.md) (merge it with yours)

@@ -76,6 +76,7 @@ function toDiagnostic(doc: vscode.TextDocument, f: Finding): vscode.Diagnostic {
 }
 
 /** Dismissals ("Not relevant") follow the line's text, so they survive edits above it. */
+let extensionRoot: string | undefined;
 let memento: { get(key: string): unknown; update(key: string, value: unknown): PromiseLike<void> } | undefined;
 const dismissKey = (ruleId: string, file: string, lineText: string) => `copal.dismissed:${ruleId}:${file}:${lineText.trim()}`;
 
@@ -565,6 +566,22 @@ function writeAgentFiles(root: string, policy: Policy) {
     fs.writeFileSync(file, next);
     changed.push(t.file);
   }
+  // Copal Skills (Agent Skills standard): Claude Code reads .claude/skills, Codex and others .agents/skills.
+  const src = extensionRoot ? path.join(extensionRoot, "skills") : "";
+  if (src && fs.existsSync(src)) {
+    for (const dir of [".claude/skills", ".agents/skills"]) {
+      for (const name of fs.readdirSync(src)) {
+        const from = path.join(src, name, "SKILL.md");
+        const to = path.join(root, dir, name, "SKILL.md");
+        if (!fs.existsSync(from)) continue;
+        const next = fs.readFileSync(from, "utf8");
+        if (fs.existsSync(to) && fs.readFileSync(to, "utf8") === next) continue;
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.writeFileSync(to, next);
+        changed.push(path.posix.join(dir, name));
+      }
+    }
+  }
   vscode.window.showInformationMessage(changed.length ? `Copal: updated ${changed.join(", ")} — commit them so every AI assistant gets your rules.` : "Copal: agent instruction files are up to date.");
 }
 
@@ -631,6 +648,7 @@ async function flushHeartbeats(ctx: vscode.ExtensionContext) {
 
 export function activate(ctx: vscode.ExtensionContext) {
   memento = ctx.workspaceState;
+  extensionRoot = (ctx as { extensionPath?: string }).extensionPath;
   extCtx = ctx;
   diagnostics = vscode.languages.createDiagnosticCollection(SOURCE);
   output = vscode.window.createOutputChannel("Copal");

@@ -16,6 +16,7 @@ node -e '
   fs.writeFileSync(process.argv[1] + "/package.json", JSON.stringify(p, null, 2));
 ' "$STAGE"
 cp README.md "$STAGE/"
+cp -r ../../skills "$STAGE/skills"
 printf 'Copyright (c) 2026 Copal.dev. All rights reserved.\n' > "$STAGE/LICENSE"
 [ "${SKIP_VSCE:-}" = 1 ] && { echo "staged in $STAGE"; exit 0; }
 (cd "$STAGE" && npx --yes @vscode/vsce package --no-dependencies --out "$OUT/")
