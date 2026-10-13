@@ -88,7 +88,7 @@ function check(doc: vscode.TextDocument) {
   const full = evaluate([fileAsChange(rel, doc.getText()), ...others], p.policy, { environment: cfg().environment });
   // Only code changed since the last commit gets hints (like "clean as you code"); untouched code stays quiet.
   const changed = cfg().hints === "all" ? null : changedLines(p.root, rel, doc.getText());
-  const keep = onChangedLines(full.findings, p.policy, rel, changed).filter((f) => !memento?.get(dismissKey(f.ruleId, doc.uri.fsPath, doc.lineAt(Math.max(f.line - 1, 0)).text)));
+  const keep = onChangedLines(full.findings.filter((f) => !p.policy.rules.find((r) => r.id === f.ruleId)?.changeSize), p.policy, rel, changed).filter((f) => !memento?.get(dismissKey(f.ruleId, doc.uri.fsPath, doc.lineAt(Math.max(f.line - 1, 0)).text)));
   const report = { ...full, findings: keep, blocking: keep.some((f) => f.blocking), summary: { ...full.summary, total: keep.length, blocking: keep.filter((f) => f.blocking).length, audit: keep.filter((f) => !f.blocking).length } };
   policyOf.set(doc.uri.toString(), p.policy);
   findingsByUri.set(doc.uri.toString(), report.findings);
@@ -111,7 +111,7 @@ const policyOf = new Map<string, Policy>();
 /** Paths changed in the working tree against HEAD, plus untracked files. Empty outside git. */
 function changedPaths(root: string): string[] {
   const tracked = gitOut(["diff", "--name-only", "HEAD"], root) ?? "";
-  const untracked = gitOut(["ls-files", "--others", "--exclude-standard"], root) ?? "";
+  const untracked = (gitOut(["ls-files", "--others", "--exclude-standard"], root) ?? "").split("\n").filter((x) => !/(^|\/)(node_modules|dist|build)\//.test(x)).join("\n");
   return (tracked + "\n" + untracked).split("\n").map((x) => x.trim()).filter(Boolean);
 }
 
@@ -184,7 +184,6 @@ export function hintCardMarkdown(f: Finding, uri: string, policy?: Policy): stri
   ].filter(Boolean);
   const risk = f.blocking ? "Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
   out.push("", `${links.join(" · ")}${risk ? ` — *${risk}*` : ""}`);
-  if (c.kata) out.push("", `$(mortar-board) Practice: [kata](${c.kata})`);
   return out.join("\n");
 }
 

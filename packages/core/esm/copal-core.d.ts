@@ -152,7 +152,7 @@ export interface Finding {
     kind?: IssueKind;
 }
 export type Risk = "high" | "medium" | "low";
-export type IssueKind = "Security" | "Error prone" | "Complexity" | "Duplication" | "Tests" | "Architecture" | "Dependencies" | "Best practice";
+export type IssueKind = "Security" | "Error prone" | "Complexity" | "Duplication" | "Tests" | "Architecture" | "Dependencies" | "Best practice" | "Change size";
 export interface Report {
     environment: string;
     /** Policy stance the report was produced under (v4). */

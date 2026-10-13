@@ -1475,9 +1475,10 @@ function classify(rule, category, severity, blocking) {
   else if (category === "architecture") [kind, risk] = ["Architecture", "medium"];
   else if (category === "dependency") [kind, risk] = ["Dependencies", "medium"];
   else if (rule.id === "focused-test") [kind, risk] = ["Error prone", "high"];
+  else if (rule.changeSize) [kind, risk] = ["Change size", "low"];
   else if (category === "testing") [kind, risk] = ["Tests", rule.id === "skipped-test" ? "low" : "medium"];
   else if (smell === "duplicate-block" || smell === "duplicated-literal") [kind, risk] = ["Duplication", smell === "duplicate-block" ? "medium" : "low"];
-  else if (smell || rule.changeSize) [kind, risk] = ["Complexity", smell === "complexity" ? "medium" : "low"];
+  else if (smell) [kind, risk] = ["Complexity", smell === "complexity" ? "medium" : "low"];
   else [kind, risk] = ["Best practice", severity === "error" ? "medium" : "low"];
   if (blocking || severity === "error") risk = "high";
   return { risk: rule.risk ?? risk, kind: rule.kind ?? kind };
