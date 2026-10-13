@@ -61,7 +61,8 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
             if (Heartbeats.due(System.currentTimeMillis())) runCli(CopalRunner.findPolicyDir(vf)?.path, "heartbeat", vf.name, "--editor", "jetbrains", "--json")
         }
         val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return
-        for (f in result.findings) {
+        val dismissed = Dismissals.of(file.project)
+        for (f in CopalText.shownInEditor(result.findings.filter { !dismissed.contains(Dismissals.key(f, lineOf(document, f))) })) {
             val range = rangeFor(document, f) ?: continue
             // Coaching is a conversation, not an error: only rules the team set to block are red.
             val severity = if (f.blocking) HighlightSeverity.ERROR else HighlightSeverity.WEAK_WARNING
@@ -74,7 +75,7 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
                 if (f.fix != null) builder = builder.withFix(ShowMeFix(f))
             } else if (f.suggestion != null) builder = builder.withFix(ApplySuggestionFix(f))
             builder = builder.withFix(FixWithAssistantFix(f))
-            if (CopalText.commentPrefix(file.name) != null) builder = builder.withFix(MarkFalsePositiveFix(f))
+            builder = builder.withFix(MarkFalsePositiveFix(f))
             builder.create()
             // growth metric: a hint counts as "shown" once per file, rule and line per IDE session
             if (f.coached && ShownHints.firstTime(file.virtualFile?.path ?: file.name, f)) {
@@ -96,4 +97,9 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
     companion object {
         private val LOG = logger<CopalExternalAnnotator>()
     }
+}
+
+private fun lineOf(doc: Document, f: Finding): String {
+    val l = (f.line - 1).coerceIn(0, maxOf(doc.lineCount - 1, 0))
+    return doc.getText(TextRange(doc.getLineStartOffset(l), doc.getLineEndOffset(l)))
 }

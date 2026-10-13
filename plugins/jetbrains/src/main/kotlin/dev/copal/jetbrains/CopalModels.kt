@@ -31,6 +31,8 @@ data class Finding(
     val column: Int? = null,
     val endColumn: Int? = null,
     val message: String = "",
+    /** What this occurrence is about, in this code (names, fields, branches). */
+    val detail: String? = null,
     val why: String? = null,
     val suggestion: Suggestion? = null,
     val fixText: String? = null,
@@ -44,7 +46,13 @@ data class Finding(
     /** Level-4 content ("Show me"): the concrete replacement, or the fix described in words. */
     val fix: String? get() = suggestion?.replacement?.trim() ?: fixText
     val coached: Boolean get() = coach != null
+    /** The fact about this code: the specific detail when the engine found one. */
+    val signal: String get() = detail ?: message
+    /** Questions where judgment matters (team decisions), answers where it doesn't. */
+    val question: String? get() = coach?.question?.takeIf { blocking || kind == null || kind in DECISIONS }
 }
+
+val DECISIONS = setOf("Architecture", "Dependencies", "Security", "Change size")
 
 data class Summary(
     val total: Int = 0,
@@ -185,31 +193,37 @@ object CopalText {
     ).joinToString("\n")
 
     /** Annotation message: the question leads when the rule is coached. */
-    fun message(f: Finding): String =
-        f.coach?.question?.let { "$it (${f.message})" } ?: "${f.message}"
+    fun message(f: Finding): String = f.question ?: f.signal
 
     /**
      * Hint card tooltip. Coached findings show level 0–1 (signal + question) and point to Alt+Enter for
      * Ask me · Explain · Show me; the fix is never displayed here. Uncoached findings keep the classic diff.
      */
     fun tooltipHtml(f: Finding): String {
-        // The question once, one line of why, then what Alt+Enter offers. No repeated "Ask me / Explain".
-        val q = f.coach?.question
-        val sb = StringBuilder("<html><b>${esc(q ?: f.message)}</b>")
-        if (q != null) sb.append("<br/>${esc(f.message)}")
-        f.why?.let { sb.append(if (q != null) " · <i>${esc(it)}</i>" else "<br/><i>${esc(it)}</i>") }
-        if (q == null) f.suggestion?.let { sb.append("<br/><code>- ${esc(it.original.trim())}</code><br/><code>+ ${esc(it.replacement.trim())}</code>") }
+        // Decisions: the question, then the fact. Mechanical issues: the fact, then what to do.
+        val q = f.question
+        val sb = StringBuilder("<html><b>${esc(q ?: f.signal)}</b>")
+        if (q != null) sb.append("<br/>${esc(f.signal)}")
+        else f.fixText?.takeIf { !it.contains('\n') }?.let { sb.append("<br/>${esc(it)}") }
         val actions = buildList {
             if (testPathIn(f.message) != null) add("Create the test")
             if (f.fix != null) add("Show me")
             add("Fix with my assistant")
             add("Not relevant")
         }
-        sb.append("<br/><br/><small>Alt+Enter → ${actions.joinToString(" · ")}</small>")
-        f.coach?.kata?.let { sb.append("<br/><small>Practice: ${esc(it)}</small>") }
         val risk = if (f.blocking) "Blocking" else f.risk?.replaceFirstChar { it.uppercase() }?.plus(" risk")
+        sb.append("<br/><small>Alt+Enter → ${actions.joinToString(" · ")}</small>")
         sb.append("<br/><small>${esc(listOfNotNull(risk, f.kind, "Copal · ${f.ruleId}").joinToString(" · "))}</small>")
         return sb.append("</html>").toString()
+    }
+
+    /** Editor hints stay quiet: medium and high risk only, at most [max] per file, riskiest first; change size is for the whole change. */
+    fun shownInEditor(findings: List<Finding>, max: Int = 3): List<Finding> {
+        val rank = mapOf("high" to 0, "medium" to 1, "low" to 2)
+        return findings
+            .filter { it.kind != "Change size" && (it.blocking || (rank[it.risk ?: "low"] ?: 2) <= 1) }
+            .sortedWith(compareBy<Finding>({ !it.blocking }, { rank[it.risk ?: "low"] ?: 2 }, { it.line }))
+            .take(max)
     }
 
     /** Level 2–3: why, reference, wrong vs right — plain text for a dialog. */

@@ -143,23 +143,31 @@ class ApplySuggestionFix(private val finding: Finding) : IntentionAction, Priori
     }
 }
 
-/** Inserts `// copal-ignore <rule>` above the line; the next check (and the PR check) suppresses the finding. */
+/** "Not relevant": hides the hint for this line in this project and records it for the team's rules to tune. No comment in the code. */
 class MarkFalsePositiveFix(private val finding: Finding) : IntentionAction {
     override fun getText() = "Copal: Not relevant here (${finding.ruleId})"
     override fun getFamilyName() = "Copal"
-    override fun startInWriteAction() = true
+    override fun startInWriteAction() = false
 
-    override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?): Boolean =
-        file != null && CopalText.commentPrefix(file.name) != null && documentOf(project, editor, file) != null
+    override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?): Boolean = documentOf(project, editor, file) != null
 
     override fun invoke(project: Project, editor: Editor?, file: PsiFile?) {
         val doc = documentOf(project, editor, file) ?: return
-        val prefix = CopalText.commentPrefix(file?.name ?: return) ?: return
         val line = (finding.line - 1).coerceIn(0, maxOf(doc.lineCount - 1, 0))
-        val indent = CopalText.leadingWhitespace(lineText(doc, line) ?: "")
-        doc.insertString(doc.getLineStartOffset(line), CopalText.ignoreLine(indent, prefix, finding.ruleId))
-        // feeds the "noisy rule" signal on the lead's dashboard
+        Dismissals.add(project, Dismissals.key(finding, lineText(doc, line) ?: ""))
         recordEvent(workDirOf(file), finding, 0, "false_positive")
+        file?.let { com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.getInstance(project).restart(it) }
+    }
+}
+
+/** Dismissed hints per project, keyed by rule, file and the line's text (so they survive edits above the line). */
+object Dismissals {
+    private const val KEY = "copal.dismissed"
+    fun key(f: Finding, lineText: String) = "${f.ruleId}|${f.file}|${lineText.trim()}"
+    fun of(project: Project): Set<String> = com.intellij.ide.util.PropertiesComponent.getInstance(project).getList(KEY)?.toSet() ?: emptySet()
+    fun add(project: Project, k: String) {
+        val pc = com.intellij.ide.util.PropertiesComponent.getInstance(project)
+        pc.setList(KEY, ((pc.getList(KEY) ?: emptyList()) + k).distinct())
     }
 }
 

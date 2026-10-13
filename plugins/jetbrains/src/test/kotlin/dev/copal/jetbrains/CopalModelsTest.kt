@@ -55,7 +55,7 @@ class CopalModelsTest {
         val f = r.findings[0]
         assertTrue(f.coached)
         assertEquals("const total = LedgerPort.round(sum, Currency.EUR);", f.fix)
-        assertEquals("Who owns rounding in this codebase? (Inline rounding bypasses LedgerPort)", CopalText.message(f))
+        assertEquals("Who owns rounding in this codebase?", CopalText.message(f))
         val tip = CopalText.tooltipHtml(f)
         assertTrue(tip.contains("<b>Who owns rounding in this codebase?</b>"))
         assertTrue(tip.contains("Fix with my assistant · Not relevant"))
@@ -169,5 +169,16 @@ class CopalModelsTest {
     fun `risk and family appear in the tooltip`() {
         val r = CopalJson.parseReport("""{"findings":[{"ruleId":"complexity","severity":"warning","mode":"audit","blocking":false,"file":"a.ts","line":2,"message":"Function f has 13 decision paths","risk":"medium","kind":"Complexity"}],"blocking":false,"summary":{"total":1,"blocking":0,"audit":1}}""")!!
         assertTrue(CopalText.tooltipHtml(r.findings[0]).contains("Medium risk · Complexity"))
+    }
+
+    @Test
+    fun `mechanical issues state the fact, decisions ask, and the editor stays quiet`() {
+        val any = Finding(ruleId = "no-explicit-any", message = "Explicit any", detail = "`original` is `any` but the code reads .id", risk = "low", kind = "Best practice", coach = Coach(question = "What do you know?"))
+        assertEquals("`original` is `any` but the code reads .id", CopalText.message(any))
+        val arch = Finding(ruleId = "ui-no-persistence", message = "Import crosses", risk = "high", kind = "Architecture", coach = Coach(question = "Which service?"))
+        assertEquals("Which service?", CopalText.message(arch))
+        val shown = CopalText.shownInEditor(listOf(any, arch) + (1..5).map { arch.copy(line = it + 1) })
+        assertEquals(3, shown.size)
+        assertTrue(shown.none { it.ruleId == "no-explicit-any" })
     }
 }
