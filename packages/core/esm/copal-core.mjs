@@ -1774,24 +1774,13 @@ function reportToMarkdown(r, title = "Copal check") {
     else if (f.coach?.question) out.push(`   _${f.coach.question}_`);
   });
   if (groups.length > TOP) out.push("", `<sub>+${groups.length - TOP} lower-risk rule${groups.length - TOP > 1 ? "s" : ""} (${groups.slice(TOP).reduce((n, g) => n + g.length, 0)} findings) in the inline comments.</sub>`);
-  out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
+  out.push("", "<sub>Not relevant? Reply `/copal false-positive <rule-id>`.</sub>");
   return out.join("\n");
 }
 function findingToMarkdown(f, opts = {}) {
   const card = hintCard(f);
-  const head = f.blocking ? "\u26D4 Copal (blocking)" : f.coach ? "\u{1F4AC} Copal coach" : "\u26A0\uFE0F Copal (audit)";
-  const out = [`**${head}** \xB7 \`${f.ruleId}\``, "", f.message];
-  if (card.question) out.push("", `**${card.question}**`);
-  const explain = [];
-  if (f.why) explain.push(f.why);
-  if (card.reference) explain.push(`Reference: ${referenceLink(card.reference, opts.referenceBase)}`);
-  if (card.example?.bad) explain.push(`Instead of: \`${card.example.bad}\``);
-  if (card.example?.good) explain.push(`Prefer: \`${card.example.good}\``);
-  if (explain.length) out.push("", f.coach ? `<details><summary>Explain</summary>
-
-${explain.join("\n\n")}
-
-</details>` : `> ${explain.join("\n> ")}`);
+  const risk = f.blocking ? "\u26D4 Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
+  const out = [`**${card.question ?? f.message}**`, "", card.question ? `${f.message}${f.why ? ` \xB7 _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
   if (f.suggestion && !f.coach) out.push("", "```suggestion", f.suggestion.replacement, "```");
   else if (card.fix) out.push("", `<details><summary>Show me</summary>
 
@@ -1800,9 +1789,10 @@ ${card.fix}
 \`\`\`
 
 </details>`);
-  if (card.kata) out.push("", `<sub>Practice: ${card.kata}${card.learningHour ? ` \xB7 learning hour: ${card.learningHour}` : ""}</sub>`);
-  if (f.sources?.length) out.push("", `<sub>Sources: ${f.sources.join(" \xB7 ")}</sub>`);
-  return out.join("\n");
+  const ref = card.reference ? ` \xB7 ${referenceLink(card.reference, opts.referenceBase)}` : "";
+  const kata = card.kata ? ` \xB7 [practice](${card.kata})` : "";
+  out.push("", `<sub>${[risk, f.kind, `Copal \xB7 \`${f.ruleId}\``].filter(Boolean).join(" \xB7 ")}${ref}${kata}</sub>`);
+  return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
 function referenceLink(ref, base2) {
   if (/^https?:\/\//.test(ref)) return `[${ref.replace(/^https?:\/\//, "")}](${ref})`;

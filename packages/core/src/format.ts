@@ -86,7 +86,7 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
     else if (f.coach?.question) out.push(`   _${f.coach.question}_`);
   });
   if (groups.length > TOP) out.push("", `<sub>+${groups.length - TOP} lower-risk rule${groups.length - TOP > 1 ? "s" : ""} (${groups.slice(TOP).reduce((n, g) => n + g.length, 0)} findings) in the inline comments.</sub>`);
-  out.push("", "<sub>Reply `/copal false-positive <rule-id>` or add `// copal-ignore <rule-id>` to suppress a finding.</sub>");
+  out.push("", "<sub>Not relevant? Reply `/copal false-positive <rule-id>`.</sub>");
   return out.join("\n");
 }
 
@@ -95,21 +95,16 @@ export function reportToMarkdown(r: Report, title = "Copal check"): string {
  * fix ("Show me") folded and never as a one-click suggestion when the rule has coaching.
  */
 export function findingToMarkdown(f: Finding, opts: { referenceBase?: string } = {}): string {
+  // Same shape as the editor hint: the question, one line of signal and why, the fix folded, a small footer.
   const card = hintCard(f);
-  const head = f.blocking ? "⛔ Copal (blocking)" : f.coach ? "💬 Copal coach" : "⚠️ Copal (audit)";
-  const out = [`**${head}** · \`${f.ruleId}\``, "", f.message];
-  if (card.question) out.push("", `**${card.question}**`);
-  const explain: string[] = [];
-  if (f.why) explain.push(f.why);
-  if (card.reference) explain.push(`Reference: ${referenceLink(card.reference, opts.referenceBase)}`);
-  if (card.example?.bad) explain.push(`Instead of: \`${card.example.bad}\``);
-  if (card.example?.good) explain.push(`Prefer: \`${card.example.good}\``);
-  if (explain.length) out.push("", f.coach ? `<details><summary>Explain</summary>\n\n${explain.join("\n\n")}\n\n</details>` : `> ${explain.join("\n> ")}`);
+  const risk = f.blocking ? "⛔ Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
+  const out = [`**${card.question ?? f.message}**`, "", card.question ? `${f.message}${f.why ? ` · _${f.why}_` : ""}` : f.why ? `_${f.why}_` : ""];
   if (f.suggestion && !f.coach) out.push("", "```suggestion", f.suggestion.replacement, "```");
   else if (card.fix) out.push("", `<details><summary>Show me</summary>\n\n\`\`\`\n${card.fix}\n\`\`\`\n\n</details>`);
-  if (card.kata) out.push("", `<sub>Practice: ${card.kata}${card.learningHour ? ` · learning hour: ${card.learningHour}` : ""}</sub>`);
-  if (f.sources?.length) out.push("", `<sub>Sources: ${f.sources.join(" · ")}</sub>`);
-  return out.join("\n");
+  const ref = card.reference ? ` · ${referenceLink(card.reference, opts.referenceBase)}` : "";
+  const kata = card.kata ? ` · [practice](${card.kata})` : "";
+  out.push("", `<sub>${[risk, f.kind, `Copal · \`${f.ruleId}\``].filter(Boolean).join(" · ")}${ref}${kata}</sub>`);
+  return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
 
 /** A repo-relative reference becomes a link to that file at the reviewed commit; URLs stay links. */

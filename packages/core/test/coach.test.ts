@@ -83,7 +83,7 @@ test("findings carry coaching and render as hint cards (fix hidden until Show me
   assert.doesNotMatch(text, /Use the Money value object/);
   assert.match(formatReport(r, { showMe: true }), /Use the Money value object/);
   const md = findingToMarkdown(money);
-  assert.match(md, /Copal coach/);
+  assert.match(md, /^\*\*What happens to 0\.1/, "the question comes first");
   assert.match(md, /<summary>Show me<\/summary>/);
   assert.doesNotMatch(md, /```suggestion/);
   assert.ok(r.findings.some((f) => f.ruleId === "domain-no-infra"), "hexagonal boundary detected");
