@@ -62,7 +62,7 @@ class CopalExternalAnnotator : ExternalAnnotator<CopalExternalAnnotator.Info, Co
         }
         val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return
         val dismissed = Dismissals.of(file.project)
-        for (f in CopalText.shownInEditor(result.findings.filter { !dismissed.contains(Dismissals.key(f, lineOf(document, f))) })) {
+        for (f in CopalText.shownInEditor(result.findings.filter { x -> !dismissed.contains(Dismissals.key(x, lineOf(document, x))) })) {
             val range = rangeFor(document, f) ?: continue
             // Coaching is a conversation, not an error: only rules the team set to block are red.
             val severity = if (f.blocking) HighlightSeverity.ERROR else HighlightSeverity.WEAK_WARNING
