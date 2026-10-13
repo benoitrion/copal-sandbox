@@ -66,29 +66,29 @@ export function groupFindings(findings: Finding[]): Finding[][] {
   return [...groups.values()];
 }
 
-export function reportToMarkdown(r: Report, title = "Copal check"): string {
-  // Read in mail and on phones: one short line per rule, most risky first, top 5 only. Noise makes people stop reading.
+export function reportToMarkdown(r: Report, title = "Copal"): string {
+  // The review's summary: one line per rule, riskiest first. Details live in the comments on the code, never twice.
   const order: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const rank = (f: Finding) => (f.blocking ? -1 : order[f.risk ?? "low"] ?? 3);
   const byRule = new Map<string, Finding[]>();
   for (const f of r.findings) (byRule.get(f.ruleId) ?? byRule.set(f.ruleId, []).get(f.ruleId)!).push(f);
   const groups = [...byRule.values()].map((g) => g.sort((a, b) => rank(a) - rank(b))).sort((a, b) => rank(a[0]) - rank(b[0]) || b.length - a.length);
-  const status = r.blocking ? "🔴 **Changes requested**" : r.findings.length ? `🟡 **${groups.length} thing${groups.length > 1 ? "s" : ""} to look at**` : "🟢 **Passed**";
-  const out = [`### ${title}`, "", `${status}${r.blocking ? ` — ${r.summary.blocking} blocking` : ""}`, ""];
+  const n = r.findings.length;
+  const gate = r.gate ? (r.gate.passed ? "✅ Gate passed" : `❌ Gate failed: ${r.gate.reasons.join(", ")}`) : r.blocking ? `❌ ${r.summary.blocking} blocking` : "";
+  const head = [`**${title}**`, n ? `${n} issue${n > 1 ? "s" : ""}` : "no issues", gate].filter(Boolean).join(" · ");
+  const out = [head, ""];
   const TOP = 5;
-  groups.slice(0, TOP).forEach((g, i) => {
+  for (const g of groups.slice(0, TOP)) {
     const f = g[0];
-    const risk = f.blocking ? "⛔ Blocking" : f.risk === "high" ? "🔴 High" : f.risk === "medium" ? "🟠 Medium" : "⚪ Low";
-    const files = [...new Set(g.map((x) => x.file))];
-    const where = `\`${f.file}:${f.line}\`${files.length > 1 ? ` and ${files.length - 1} other file${files.length > 2 ? "s" : ""}` : ""}${g.length > 1 ? ` · ${g.length}×` : ""}`;
-    out.push(`${i + 1}. ${risk}${f.kind ? ` · ${f.kind}` : ""} — **${f.message}**`, `   ${where}`);
-    if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication" || f.kind === "Change size")) out.push(`   Suggestion: ${f.fixText.replace(/\n/g, "\n   ")}`);
-    else if (hintCard(f).question) out.push(`   _${hintCard(f).question}_`);
-    else if (g.length === 1 && f.detail) out.push(`   ${f.detail}`);
-  });
-  if (groups.length > TOP) out.push("", `<sub>+${groups.length - TOP} lower-risk rule${groups.length - TOP > 1 ? "s" : ""} (${groups.slice(TOP).reduce((n, g) => n + g.length, 0)} findings) in the inline comments.</sub>`);
-  out.push("", "<sub>Not relevant? Reply `/copal false-positive <rule-id>`.</sub>");
-  return out.join("\n");
+    const risk = f.blocking ? "**Blocking** · " : f.risk === "high" ? "**High risk** · " : "";
+    const text = (g.length === 1 && f.detail ? f.detail.split(";")[0] : f.message).replace(/\s*\(for example [^)]*\)/, "");
+    const files = new Set(g.map((x) => x.file)).size;
+    const where = g.length > 1 ? `${g.length}× in ${files} file${files > 1 ? "s" : ""}` : `\`${f.file.replace(/^.*\//, "")}:${f.line}\``;
+    out.push(`- ${risk}**${f.kind ?? "Copal"}** — ${text} · ${where}`);
+    if (f.kind === "Change size" && f.fixText) out.push(`  ${f.fixText.replace(/\n/g, "\n  ")}`);
+  }
+  if (groups.length > TOP) out.push(`- _+${groups.length - TOP} more, lower risk_`);
+  return out.join("\n").trimEnd();
 }
 
 /**
@@ -104,9 +104,9 @@ export const commentMarker = (ruleId: string, kind?: string) => `<!-- copal:${ru
  * One inline review comment, like a good reviewer's: a label with the risk, one specific paragraph (what this code
  * does, why it matters), the change to commit when there is one, and a one-line footer for feedback.
  */
-export function findingToMarkdown(f: Finding, opts: { referenceBase?: string } = {}): string {
+export function findingToMarkdown(f: Finding, opts: { referenceBase?: string; practice?: boolean } = {}): string {
   const card = hintCard(f);
-  const risk = f.blocking ? "⛔ Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
+  const risk = f.blocking ? "Blocking" : f.risk === "high" ? "High risk" : "";
   const label = [f.kind ? `${KIND_ICON[f.kind] ?? "💬"} **${f.kind}**` : "💬 **Copal**", risk].filter(Boolean).join(" · ");
   const sentence = (t: string) => t.replace(/\s+$/, "").replace(/([^.?!:])$/, "$1.");
   const fixLine = card.fix && !card.fix.includes("\n") && !f.suggestion ? ` ${sentence(card.fix)}` : "";
@@ -120,8 +120,8 @@ export function findingToMarkdown(f: Finding, opts: { referenceBase?: string } =
     out.push("", `<details><summary>${title}</summary>\n\n\`\`\`${f.kind === "Tests" ? "ts" : ""}\n${card.fix}\n\`\`\`\n\n</details>`);
   }
   const ref = card.reference ? ` · ${referenceLink(card.reference, opts.referenceBase)}` : "";
-  const kata = card.kata ? ` · [practice](${card.kata})` : "";
-  out.push("", `<sub>Spotted by **Copal** · \`${f.ruleId}\`${ref}${kata} · Is this helpful? React 👍 or 👎</sub>`, commentMarker(f.ruleId, f.kind));
+  const kata = opts.practice && card.kata ? ` · [practice](${card.kata})` : "";
+  out.push("", `<sub>Copal${ref}${kata} · React 👍 or 👎</sub>`, commentMarker(f.ruleId, f.kind));
   return out.join("\n");
 }
 

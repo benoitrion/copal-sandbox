@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { classify, hintCard, detectSmell, evaluate, fileAsChange, parsePolicy, reportToMarkdown, resolvePolicy } from "../src";
+import { classify, findingToMarkdown, hintCard, detectSmell, evaluate, fileAsChange, parsePolicy, reportToMarkdown, resolvePolicy } from "../src";
 
 const segs = ["retail", "wholesale", "partner", "public"];
 const dup = segs.map((s) => `export function discount_${s}(order: Order) {\n  let total = 0;\n  for (const line of order.lines) {\n    total += line.amount * line.qty;\n  }\n  if (order.segment === "${s}") {\n    total = total * 0.9;\n  }\n  return total;\n}\n`).join("\n");
@@ -31,8 +31,8 @@ test("every finding carries a risk and a family; the PR comment ranks by risk an
   const d = r.findings.find((f) => f.ruleId === "duplicate-block")!;
   assert.deepEqual([d.risk, d.kind], ["medium", "Duplication"]);
   const md = reportToMarkdown(r);
-  assert.ok(md.indexOf("🔴 High") < md.indexOf("🟠 Medium"));
-  assert.match(md, /Suggestion: It is repeated in/);
+  assert.ok(md.indexOf("**High risk**") < md.indexOf("**Duplication**"), "riskiest first");
+  assert.match(findingToMarkdown(d), /It is repeated in/, "the advice is in the comment on the code");
   assert.deepEqual(classify({ id: "x", pattern: "x", risk: "low", kind: "Tests" }, "security", "error", true), { risk: "low", kind: "Tests" });
 });
 

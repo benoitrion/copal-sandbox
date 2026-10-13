@@ -29,7 +29,7 @@ function scopeMarkdown(cs: ChangeSet): string | undefined {
   if (!cs.briefText) return undefined;
   const items = scopeCheck(cs.briefText, cs.files);
   if (!items.length) return undefined;
-  return ["#### Beyond the agreed brief", "", ...items.map((i) => `- ${i.question}${i.details.length ? ` _(${i.details.slice(0, 4).join(", ")}${i.details.length > 4 ? `, +${i.details.length - 4} more` : ""})_` : ""}`)].join("\n");
+  return items.map((i) => `- **Scope** — ${i.question}${i.details.length ? ` _(${i.details.slice(0, 3).join(", ")}${i.details.length > 3 ? `, +${i.details.length - 3} more` : ""})_` : ""}`).join("\n");
 }
 
 /** Analyze one PR/MR and publish results natively in the Git provider. */
@@ -98,7 +98,8 @@ export async function runCheck(provider: GitProvider, client = new CopalClient()
       : result.findings.length
         ? `Passed with ${result.summary.audit} audit finding(s)`
         : "Passed — no findings";
-    let scope = [gateLine(gate), scopeMarkdown(cs)].filter(Boolean).join("\n\n") || undefined;
+    if (gate) result.gate = gate;
+    let scope = (result.findings.length ? scopeMarkdown(cs) : [gateLine(gate), scopeMarkdown(cs)].filter(Boolean).join("\n\n")) || undefined;
     try {
       // Reviewer guide: where to look first (tests, brief, risky files), so review effort goes where it matters.
       const policy = resolvePolicy(parsePolicy(cs.policyText));

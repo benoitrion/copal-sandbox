@@ -14,7 +14,7 @@ test("Review my change on billing-api scenario 01: three hint cards with Ask me 
   for (const c of r.cards as { ruleId: string; actions: string[]; markdown: string; file: string; line: number }[]) {
     // Questions only where the team decides: the missing test is stated, not asked.
     assert.deepEqual(c.actions, c.ruleId === "invoice-contract-test" ? ["Explain", "Show me"] : ["Ask me", "Explain", "Show me"], c.ruleId);
-    assert.ok(c.markdown.includes(`\`${c.ruleId}\``), "same format as the PR comment");
+    assert.ok(c.markdown.includes(`<!-- copal:${c.ruleId}`), "same format as the PR comment");
     assert.ok(c.file && c.line > 0);
   }
   assert.deepEqual(r.scope, [], "no brief → no scope questions");

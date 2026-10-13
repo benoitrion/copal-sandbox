@@ -153,6 +153,8 @@ export type Risk = "high" | "medium" | "low";
 export type IssueKind = "Security" | "Error prone" | "Complexity" | "Duplication" | "Tests" | "Architecture" | "Dependencies" | "Best practice" | "Change size";
 
 export interface Report {
+  /** Pass/fail on what the change introduces, when the policy has a gate. */
+  gate?: { passed: boolean; reasons: string[] };
   environment: string;
   /** Policy stance the report was produced under (v4). */
   policyMode?: PolicyMode;

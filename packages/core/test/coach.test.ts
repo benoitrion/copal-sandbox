@@ -84,9 +84,9 @@ test("findings carry coaching and render as hint cards (fix hidden until Show me
   assert.doesNotMatch(text, /Use the Money value object/);
   assert.match(formatReport(r, { showMe: true }), /Use the Money value object/);
   const md = findingToMarkdown(money);
-  assert.match(md, /^✨ \*\*Best practice\*\* · Low risk/, "a label with the risk comes first");
+  assert.match(md, /^✨ \*\*Best practice\*\*\n/, "a label first; risk only when high");
   assert.match(md, /Use the Money value object\./, "a one-line fix is said plainly");
-  assert.match(md, /Spotted by \*\*Copal\*\* · `no-float-money`/);
+  assert.match(md, /<!-- copal:no-float-money\|Best practice -->/);
   assert.doesNotMatch(md, /```suggestion/);
   assert.ok(r.findings.some((f) => f.ruleId === "domain-no-infra"), "hexagonal boundary detected");
 });

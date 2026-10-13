@@ -158,6 +158,11 @@ export interface Finding {
 export type Risk = "high" | "medium" | "low";
 export type IssueKind = "Security" | "Error prone" | "Complexity" | "Duplication" | "Tests" | "Architecture" | "Dependencies" | "Best practice" | "Change size";
 export interface Report {
+    /** Pass/fail on what the change introduces, when the policy has a gate. */
+    gate?: {
+        passed: boolean;
+        reasons: string[];
+    };
     environment: string;
     /** Policy stance the report was produced under (v4). */
     policyMode?: PolicyMode;
@@ -337,6 +342,7 @@ export declare const commentMarker: (ruleId: string, kind?: string) => string;
  */
 export declare function findingToMarkdown(f: Finding, opts?: {
     referenceBase?: string;
+    practice?: boolean;
 }): string;
 /** A repo-relative reference becomes a link to that file at the reviewed commit; URLs stay links. */
 export declare function referenceLink(ref: string, base?: string): string;

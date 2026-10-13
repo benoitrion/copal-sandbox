@@ -67,7 +67,7 @@ export async function runCommand(ctx: CommandContext, client = new CopalClient()
         fixText: typeof rule.fix === "string" ? rule.fix : rule.fix?.with,
         sources: rule.sources,
       },
-      { referenceBase: ctx.referenceBase },
+      { practice: true, referenceBase: ctx.referenceBase },
     );
   }
 

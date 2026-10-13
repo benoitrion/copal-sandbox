@@ -1104,7 +1104,7 @@ function exportedFunctions(content) {
       }
       if (started && depth <= 0) break;
     }
-    out.push({ name: m[1] ?? m[2], branches });
+    out.push({ name: m[1] ?? m[2], branches, line: i + 1 });
   });
   return out;
 }
@@ -1713,6 +1713,10 @@ function checkRequireTest(rule, files) {
       const f = base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning");
       const d = testDetail(basename(file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
       if (d) f.detail = `${d}; add \`${concreteTestPath(expected, file.path)}\``;
+      const src = file.content ?? file.addedLines.map((l) => l.text).join("\n");
+      const fn = exportedFunctions(src).sort((a, b) => b.branches - a.branches)[0];
+      const at = fn && file.content ? fn.line : fn ? file.addedLines[fn.line - 1]?.line : void 0;
+      if (at && file.addedLines.some((l) => l.line === at)) f.line = at;
       const skeleton = testSkeletonFor(file.path, concreteTestPath(expected, file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
       if (skeleton && !f.fixText) f.fixText = skeleton;
       out.push(f);
@@ -1866,34 +1870,34 @@ function groupFindings(findings) {
   }
   return [...groups.values()];
 }
-function reportToMarkdown(r, title = "Copal check") {
+function reportToMarkdown(r, title = "Copal") {
   const order = { high: 0, medium: 1, low: 2 };
   const rank = (f) => f.blocking ? -1 : order[f.risk ?? "low"] ?? 3;
   const byRule = /* @__PURE__ */ new Map();
   for (const f of r.findings) (byRule.get(f.ruleId) ?? byRule.set(f.ruleId, []).get(f.ruleId)).push(f);
   const groups = [...byRule.values()].map((g) => g.sort((a, b) => rank(a) - rank(b))).sort((a, b) => rank(a[0]) - rank(b[0]) || b.length - a.length);
-  const status = r.blocking ? "\u{1F534} **Changes requested**" : r.findings.length ? `\u{1F7E1} **${groups.length} thing${groups.length > 1 ? "s" : ""} to look at**` : "\u{1F7E2} **Passed**";
-  const out = [`### ${title}`, "", `${status}${r.blocking ? ` \u2014 ${r.summary.blocking} blocking` : ""}`, ""];
+  const n = r.findings.length;
+  const gate = r.gate ? r.gate.passed ? "\u2705 Gate passed" : `\u274C Gate failed: ${r.gate.reasons.join(", ")}` : r.blocking ? `\u274C ${r.summary.blocking} blocking` : "";
+  const head = [`**${title}**`, n ? `${n} issue${n > 1 ? "s" : ""}` : "no issues", gate].filter(Boolean).join(" \xB7 ");
+  const out = [head, ""];
   const TOP = 5;
-  groups.slice(0, TOP).forEach((g, i) => {
+  for (const g of groups.slice(0, TOP)) {
     const f = g[0];
-    const risk = f.blocking ? "\u26D4 Blocking" : f.risk === "high" ? "\u{1F534} High" : f.risk === "medium" ? "\u{1F7E0} Medium" : "\u26AA Low";
-    const files = [...new Set(g.map((x) => x.file))];
-    const where = `\`${f.file}:${f.line}\`${files.length > 1 ? ` and ${files.length - 1} other file${files.length > 2 ? "s" : ""}` : ""}${g.length > 1 ? ` \xB7 ${g.length}\xD7` : ""}`;
-    out.push(`${i + 1}. ${risk}${f.kind ? ` \xB7 ${f.kind}` : ""} \u2014 **${f.message}**`, `   ${where}`);
-    if (f.fixText && (f.kind === "Complexity" || f.kind === "Duplication" || f.kind === "Change size")) out.push(`   Suggestion: ${f.fixText.replace(/\n/g, "\n   ")}`);
-    else if (hintCard(f).question) out.push(`   _${hintCard(f).question}_`);
-    else if (g.length === 1 && f.detail) out.push(`   ${f.detail}`);
-  });
-  if (groups.length > TOP) out.push("", `<sub>+${groups.length - TOP} lower-risk rule${groups.length - TOP > 1 ? "s" : ""} (${groups.slice(TOP).reduce((n, g) => n + g.length, 0)} findings) in the inline comments.</sub>`);
-  out.push("", "<sub>Not relevant? Reply `/copal false-positive <rule-id>`.</sub>");
-  return out.join("\n");
+    const risk = f.blocking ? "**Blocking** \xB7 " : f.risk === "high" ? "**High risk** \xB7 " : "";
+    const text = (g.length === 1 && f.detail ? f.detail.split(";")[0] : f.message).replace(/\s*\(for example [^)]*\)/, "");
+    const files = new Set(g.map((x) => x.file)).size;
+    const where = g.length > 1 ? `${g.length}\xD7 in ${files} file${files > 1 ? "s" : ""}` : `\`${f.file.replace(/^.*\//, "")}:${f.line}\``;
+    out.push(`- ${risk}**${f.kind ?? "Copal"}** \u2014 ${text} \xB7 ${where}`);
+    if (f.kind === "Change size" && f.fixText) out.push(`  ${f.fixText.replace(/\n/g, "\n  ")}`);
+  }
+  if (groups.length > TOP) out.push(`- _+${groups.length - TOP} more, lower risk_`);
+  return out.join("\n").trimEnd();
 }
 var KIND_ICON = { Security: "\u{1F512}", Architecture: "\u{1F3DB}\uFE0F", Dependencies: "\u{1F4E6}", Tests: "\u{1F9EA}", Complexity: "\u{1F300}", Duplication: "\u{1F4D1}", "Error prone": "\u{1F41E}", "Best practice": "\u2728", "Change size": "\u{1F4CF}" };
 var commentMarker = (ruleId, kind) => `<!-- copal:${ruleId}${kind ? `|${kind}` : ""} -->`;
 function findingToMarkdown(f, opts = {}) {
   const card = hintCard(f);
-  const risk = f.blocking ? "\u26D4 Blocking" : f.risk ? `${f.risk[0].toUpperCase()}${f.risk.slice(1)} risk` : "";
+  const risk = f.blocking ? "Blocking" : f.risk === "high" ? "High risk" : "";
   const label = [f.kind ? `${KIND_ICON[f.kind] ?? "\u{1F4AC}"} **${f.kind}**` : "\u{1F4AC} **Copal**", risk].filter(Boolean).join(" \xB7 ");
   const sentence = (t) => t.replace(/\s+$/, "").replace(/([^.?!:])$/, "$1.");
   const fixLine = card.fix && !card.fix.includes("\n") && !f.suggestion ? ` ${sentence(card.fix)}` : "";
@@ -1911,8 +1915,8 @@ ${card.fix}
 </details>`);
   }
   const ref = card.reference ? ` \xB7 ${referenceLink(card.reference, opts.referenceBase)}` : "";
-  const kata = card.kata ? ` \xB7 [practice](${card.kata})` : "";
-  out.push("", `<sub>Spotted by **Copal** \xB7 \`${f.ruleId}\`${ref}${kata} \xB7 Is this helpful? React \u{1F44D} or \u{1F44E}</sub>`, commentMarker(f.ruleId, f.kind));
+  const kata = opts.practice && card.kata ? ` \xB7 [practice](${card.kata})` : "";
+  out.push("", `<sub>Copal${ref}${kata} \xB7 React \u{1F44D} or \u{1F44E}</sub>`, commentMarker(f.ruleId, f.kind));
   return out.join("\n");
 }
 function referenceLink(ref, base2) {

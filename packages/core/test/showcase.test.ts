@@ -34,7 +34,7 @@ test("report: one line per rule, with where it is and how often", () => {
   const findings = [f(3), f(11), f(19), { ...f(1), file: "src/b.ts" }];
   assert.equal(groupFindings(findings).length, 2);
   const md = reportToMarkdown({ environment: "ci", policyMode: "coach", findings, blocking: false, summary: { total: 4, blocking: 0, audit: 4, byCategory: {} }, filesChecked: 2, rulesEvaluated: 1 } as Report);
-  assert.match(md, /1 thing to look at/);
-  assert.match(md, /`src\/a\.ts:3` and 1 other file · 4×/);
+  assert.match(md, /^\*\*Copal\*\* · 4 issues/);
+  assert.match(md, /- \*\*Copal\*\* — Explicit any · 4× in 2 files/);
   assert.doesNotMatch(md, /\|/);
 });

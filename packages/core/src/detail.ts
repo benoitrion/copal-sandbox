@@ -17,9 +17,9 @@ export function anyDetail(lineText: string, content?: string): { detail: string;
 }
 
 /** Exported functions of a file with their number of decision points (if, case, ?:, &&, ||). */
-export function exportedFunctions(content: string): { name: string; branches: number }[] {
+export function exportedFunctions(content: string): { name: string; branches: number; line: number }[] {
   const lines = content.split(/\r?\n/);
-  const out: { name: string; branches: number }[] = [];
+  const out: { name: string; branches: number; line: number }[] = [];
   lines.forEach((l, i) => {
     const m = /export\s+(?:default\s+)?(?:async\s+)?function\s+(\w+)|export\s+const\s+(\w+)\s*=\s*(?:async\s*)?\(/.exec(l);
     if (!m) return;
@@ -33,7 +33,7 @@ export function exportedFunctions(content: string): { name: string; branches: nu
       }
       if (started && depth <= 0) break;
     }
-    out.push({ name: m[1] ?? m[2], branches });
+    out.push({ name: m[1] ?? m[2], branches, line: i + 1 });
   });
   return out;
 }

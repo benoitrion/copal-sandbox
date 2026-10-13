@@ -1,4 +1,4 @@
-import { anyDetail, testDetail, testSkeletonFor } from "./detail";
+import { anyDetail, exportedFunctions, testDetail, testSkeletonFor } from "./detail";
 import { splitPlan, splitPlanText } from "./split";
 import * as posix from "./posix";
 import { inScope, matchGlob, normalizePath } from "./glob";
@@ -258,6 +258,11 @@ function checkRequireTest(rule: Rule, files: FileChange[]): Finding[] {
       const f = base(rule, file.path, file.addedLines[0]?.line ?? 1, `No test changed for ${posix.basename(file.path)} (for example ${concreteTestPath(expected, file.path)})`, "testing", "warning");
       const d = testDetail(posix.basename(file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
       if (d) f.detail = `${d}; add \`${concreteTestPath(expected, file.path)}\``;
+      // Anchor on the untested function the reviewer should look at, not on the file's first line.
+      const src = file.content ?? file.addedLines.map((l) => l.text).join("\n");
+      const fn = exportedFunctions(src).sort((a, b) => b.branches - a.branches)[0];
+      const at = fn && file.content ? fn.line : fn ? file.addedLines[fn.line - 1]?.line : undefined;
+      if (at && file.addedLines.some((l) => l.line === at)) f.line = at;
       const skeleton = testSkeletonFor(file.path, concreteTestPath(expected, file.path), file.content ?? file.addedLines.map((l) => l.text).join("\n"));
       if (skeleton && !f.fixText) f.fixText = skeleton;
       out.push(f);
